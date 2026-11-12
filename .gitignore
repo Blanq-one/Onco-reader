@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 node_modules/
+# raw TCGA files live in challenge-ref and must never be committed
 /data/
 raw/
 *.tsv

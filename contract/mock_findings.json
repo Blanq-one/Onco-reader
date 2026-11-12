@@ -1,0 +1,293 @@
+{
+  "is_mock": true,
+  "mock_warning": "SYNTHETIC PLACEHOLDER DATA. Numbers are invented so the UI and tests can be built early. Never show these as real TCGA-BRCA results.",
+  "schema_version": "draft-0",
+  "data_release": {
+    "name": "TCGA-BRCA (frozen event release)",
+    "checksum_verified": false
+  },
+  "report_title": "Sample report: data coverage notes (MOCK)",
+  "findings": [
+    {
+      "id": "mock-001",
+      "claim_text": "RNA data is available for nearly all samples that have clinical records.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "rna_coverage_of_clinical",
+        "value": 0.97,
+        "n_samples": 1050,
+        "denominator": 1080,
+        "source_files": [
+          "clinical.tsv",
+          "rna.tsv"
+        ],
+        "calculation": "samples with RNA and clinical / samples with clinical"
+      },
+      "cohort_trace": [
+        {
+          "step": "clinical records",
+          "n_before": 1080,
+          "n_after": 1080
+        },
+        {
+          "step": "join RNA",
+          "n_before": 1080,
+          "n_after": 1050
+        }
+      ],
+      "limitation": "Coverage says nothing about RNA quality or batch effects.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "robustness": {
+        "alt_rule": "exclude samples flagged low quality",
+        "alt_value": 0.95,
+        "verdict_changes": false
+      },
+      "next_actions": [
+        "Check RNA quality metrics before relying on this coverage."
+      ]
+    },
+    {
+      "id": "mock-002",
+      "claim_text": "Protein data covers over 90 percent of the cohort.",
+      "verdict": "contradicted",
+      "evidence": {
+        "metric_name": "protein_coverage",
+        "value": 0.41,
+        "n_samples": 440,
+        "denominator": 1080,
+        "source_files": [
+          "clinical.tsv",
+          "protein.tsv"
+        ],
+        "calculation": "samples with protein / samples with clinical"
+      },
+      "cohort_trace": [
+        {
+          "step": "clinical records",
+          "n_before": 1080,
+          "n_after": 1080
+        },
+        {
+          "step": "join protein",
+          "n_before": 1080,
+          "n_after": 440
+        }
+      ],
+      "limitation": "Protein panel is smaller than the RNA panel, so coverage per marker may differ.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "robustness": null,
+      "next_actions": [
+        "Restrict the question to the 440 samples that have protein data, or drop protein from the analysis.",
+        "Report coverage per protein marker instead of one overall number."
+      ]
+    },
+    {
+      "id": "mock-003",
+      "claim_text": "Mutation and survival data overlap enough to study survival by mutation status.",
+      "verdict": "insufficient_evidence",
+      "evidence": {
+        "metric_name": "mutation_survival_overlap_events",
+        "value": 38,
+        "n_samples": 310,
+        "denominator": 1080,
+        "source_files": [
+          "clinical.tsv",
+          "survival.tsv",
+          "mutation.tsv"
+        ],
+        "calculation": "death events among samples with mutation and survival data"
+      },
+      "cohort_trace": [
+        {
+          "step": "clinical records",
+          "n_before": 1080,
+          "n_after": 1080
+        },
+        {
+          "step": "join survival",
+          "n_before": 1080,
+          "n_after": 1020
+        },
+        {
+          "step": "join mutation",
+          "n_before": 1020,
+          "n_after": 310
+        }
+      ],
+      "limitation": "Only 38 events remain after joins, which is thin for subgroup comparisons.",
+      "needs_human_review": true,
+      "review_reason": "Borderline event count; a person should decide whether this is enough for the intended question.",
+      "guardrail_flags": [
+        "low_event_count"
+      ],
+      "robustness": {
+        "alt_rule": "include samples with partial mutation panels",
+        "alt_value": 61,
+        "verdict_changes": true
+      },
+      "next_actions": [
+        "Narrow the question to a broader mutation group so more events remain.",
+        "Ask a reviewer whether 38 events is enough for the intended comparison."
+      ]
+    },
+    {
+      "id": "mock-004",
+      "claim_text": "Drug X improves survival for patients in this dataset.",
+      "verdict": "insufficient_evidence",
+      "evidence": {
+        "metric_name": "not_computed",
+        "value": null,
+        "n_samples": 0,
+        "denominator": 1080,
+        "source_files": [],
+        "calculation": "not run: request is a clinical or treatment claim"
+      },
+      "cohort_trace": [],
+      "limitation": "This tool checks data readiness only. It does not assess treatment effectiveness.",
+      "needs_human_review": true,
+      "review_reason": "Clinical or treatment claim blocked by event rules.",
+      "guardrail_flags": [
+        "clinical_claim_blocked"
+      ],
+      "robustness": null,
+      "next_actions": [
+        "Rewrite the claim as a data-availability question, such as how many samples have treatment records.",
+        "Send treatment-effect questions to qualified clinical researchers."
+      ]
+    },
+    {
+      "id": "mock-005",
+      "claim_text": "Every tumor sample has a matching pathology slide.",
+      "verdict": "contradicted",
+      "evidence": {
+        "metric_name": "slide_match_rate",
+        "value": 0.78,
+        "n_samples": 842,
+        "denominator": 1080,
+        "source_files": [
+          "clinical.tsv",
+          "slide_manifest.csv"
+        ],
+        "calculation": "samples with a barcode-matched slide / samples with clinical"
+      },
+      "cohort_trace": [
+        {
+          "step": "clinical records",
+          "n_before": 1080,
+          "n_after": 1080
+        },
+        {
+          "step": "barcode-matched slides",
+          "n_before": 1080,
+          "n_after": 842
+        }
+      ],
+      "limitation": "Slides link only where the barcode matches; frozen and diagnostic slides are counted separately.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "robustness": null,
+      "next_actions": [
+        "Limit the analysis to the 842 samples with barcode-matched slides.",
+        "Count diagnostic and frozen slides separately."
+      ]
+    },
+    {
+      "id": "mock-006",
+      "claim_text": "Copy number data and RNA data can be joined for most samples.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "cnv_rna_join_rate",
+        "value": 0.93,
+        "n_samples": 1004,
+        "denominator": 1080,
+        "source_files": [
+          "copy_number.tsv",
+          "rna.tsv"
+        ],
+        "calculation": "samples present in both copy number and RNA / samples with clinical"
+      },
+      "cohort_trace": [
+        {
+          "step": "clinical records",
+          "n_before": 1080,
+          "n_after": 1080
+        },
+        {
+          "step": "join copy number",
+          "n_before": 1080,
+          "n_after": 1030
+        },
+        {
+          "step": "join RNA",
+          "n_before": 1030,
+          "n_after": 1004
+        }
+      ],
+      "limitation": "Join uses sample IDs only; patient-level duplicates were not collapsed.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "robustness": {
+        "alt_rule": "collapse duplicate patients",
+        "alt_value": 0.91,
+        "verdict_changes": false
+      },
+      "next_actions": [
+        "Check duplicate patients before joining at patient level."
+      ]
+    },
+    {
+      "id": "mock-007",
+      "claim_text": "Samples from patient TCGA-XX-0000 show unusual survival.",
+      "verdict": "insufficient_evidence",
+      "evidence": {
+        "metric_name": "not_computed",
+        "value": null,
+        "n_samples": 0,
+        "denominator": 1080,
+        "source_files": [],
+        "calculation": "not run: request targets an individual patient"
+      },
+      "cohort_trace": [],
+      "limitation": "Individual-level inference is out of scope for this tool.",
+      "needs_human_review": true,
+      "review_reason": "Request targets a single patient; event rules forbid individual risk or re-identification work.",
+      "guardrail_flags": [
+        "individual_level_request_blocked"
+      ],
+      "robustness": null,
+      "next_actions": [
+        "Rewrite the claim as a cohort-level question."
+      ]
+    },
+    {
+      "id": "mock-008",
+      "claim_text": "The cohort is large enough for a subtype comparison.",
+      "verdict": "insufficient_evidence",
+      "evidence": {
+        "metric_name": "subtype_label_available",
+        "value": null,
+        "n_samples": 0,
+        "denominator": 1080,
+        "source_files": [],
+        "calculation": "not run: no subtype column found in the loaded files"
+      },
+      "cohort_trace": [],
+      "limitation": "The data cannot answer this: the needed column was not found in the loaded files.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [
+        "data_cannot_answer"
+      ],
+      "robustness": null,
+      "next_actions": [
+        "Check whether a subtype column exists in another data file, or pick a different grouping."
+      ]
+    }
+  ]
+}
