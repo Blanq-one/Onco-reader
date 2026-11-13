@@ -1,97 +1,115 @@
-"""Repo hygiene checks: secrets, raw data, overclaiming language.
+"""Repo hygiene checks: secrets, raw data, personal info, overclaiming language.
 
-Run from the repo root. Scans src/, app/, contract/ and README.md.
+The checks themselves live in scripts/scan_repo.py, so `python scripts/scan_repo.py`
+and this test always agree. Scope and banned phrases are documented there.
 To allow a deliberate mention of a banned phrase, add the marker
 `allow-phrase` on the same line.
 """
+import importlib.util
 import os
-import re
+import tempfile
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCAN_DIRS = ["src", "app", "contract"]
-SCAN_FILES = ["README.md"]
-SKIP_DIRS = {"node_modules", ".git", "dist", "build", "__pycache__", ".venv", "venv"}
-TEXT_EXT = {".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".md", ".json", ".txt", ".yml", ".yaml", ".toml"}
-
-BANNED_PHRASES = [
-    "production ready", "production-ready", "production level", "production-level",
-    "clinically validated", "clinical grade", "clinical-grade",
-    "hipaa compliant", "fda approved", "fda-approved", "regulatory compliant",
-]
-SECRET_PATTERNS = [
-    re.compile(r"sk-[A-Za-z0-9_\-]{20,}"),
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"\s]{12,}['\"]"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-]
-MAX_FILE_BYTES = 5 * 1024 * 1024
-RAW_DATA_EXT = {".tsv", ".csv", ".gz", ".zip", ".parquet", ".svs", ".tif", ".tiff", ".h5", ".npz"}
-ALLOWED_DATA_FILES = {"edge_cases.csv"}  # small hand-written files are fine
-
-
-def iter_files():
-    for d in SCAN_DIRS:
-        base = os.path.join(ROOT, d)
-        for dirpath, dirnames, filenames in os.walk(base):
-            dirnames[:] = [x for x in dirnames if x not in SKIP_DIRS]
-            for name in filenames:
-                yield os.path.join(dirpath, name)
-    for name in SCAN_FILES:
-        p = os.path.join(ROOT, name)
-        if os.path.exists(p):
-            yield p
-
-
-def text_lines(path):
-    if os.path.splitext(path)[1].lower() not in TEXT_EXT:
-        return []
-    try:
-        with open(path, encoding="utf-8", errors="ignore") as fh:
-            return list(enumerate(fh.read().splitlines(), 1))
-    except OSError:
-        return []
+_spec = importlib.util.spec_from_file_location("scan_repo", os.path.join(ROOT, "scripts", "scan_repo.py"))
+scan_repo = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(scan_repo)
 
 
 class TestHygiene(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.files = scan_repo.repo_files(ROOT)
+
+    def assertClean(self, problems):
+        self.assertEqual(problems, [], "\n" + "\n".join(problems))
+
+    def test_scan_covers_the_repo(self):
+        rel = {os.path.relpath(p, ROOT).replace(os.sep, "/") for p in self.files}
+        for expected in ["README.md", "src/engine/engine.py", "src/guardrails/rules.py", "contract/validate_findings.py"]:
+            self.assertIn(expected, rel)
+
     def test_no_overclaiming_language(self):
-        for path in iter_files():
-            for n, line in text_lines(path):
-                low = line.lower()
-                if "allow-phrase" in low:
-                    continue
-                for phrase in BANNED_PHRASES:
-                    with self.subTest(file=os.path.relpath(path, ROOT), line=n):
-                        self.assertNotIn(phrase, low)
+        self.assertClean(scan_repo.check_overclaiming(self.files, ROOT))
 
     def test_no_secrets(self):
-        for path in iter_files():
-            for n, line in text_lines(path):
-                for pat in SECRET_PATTERNS:
-                    with self.subTest(file=os.path.relpath(path, ROOT), line=n):
-                        self.assertIsNone(pat.search(line))
-
-    def test_env_file_is_ignored(self):
-        if os.path.exists(os.path.join(ROOT, ".env")):
-            gi = os.path.join(ROOT, ".gitignore")
-            self.assertTrue(os.path.exists(gi), ".env exists but .gitignore is missing")
-            self.assertIn(".env", open(gi).read(), ".env is not listed in .gitignore")
-
-    def test_gitignore_blocks_data_and_env(self):
-        gi = os.path.join(ROOT, ".gitignore")
-        self.assertTrue(os.path.exists(gi), ".gitignore is missing")
-        content = open(gi).read()
-        self.assertIn(".env", content)
-        self.assertTrue("data/" in content or "data" in content)
+        self.assertClean(scan_repo.check_secrets(self.files, ROOT))
 
     def test_no_raw_data_or_huge_files(self):
-        for path in iter_files():
-            name = os.path.basename(path)
-            ext = os.path.splitext(name)[1].lower()
-            with self.subTest(file=os.path.relpath(path, ROOT)):
-                self.assertLess(os.path.getsize(path), MAX_FILE_BYTES, "file too large")
-                if ext in RAW_DATA_EXT:
-                    self.assertIn(name, ALLOWED_DATA_FILES, "possible raw data file")
+        self.assertClean(scan_repo.check_raw_data(self.files, ROOT))
+
+    def test_no_personal_info(self):
+        self.assertClean(scan_repo.check_personal_info(self.files, ROOT))
+
+    def test_gitignore_blocks_data_and_env(self):
+        self.assertClean(scan_repo.check_gitignore(ROOT, self.files))
+
+    def test_env_example_has_key_names_only(self):
+        path = os.path.join(ROOT, ".env.example")
+        if not os.path.exists(path):
+            self.skipTest("no .env.example")
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                key, _, value = line.strip().partition("=")
+                if line.strip().startswith("#") or not key:
+                    continue
+                if any(w in key.upper() for w in ("KEY", "SECRET", "TOKEN", "PASSWORD")):
+                    self.assertEqual(value.strip(), "", f"{key} must be empty in .env.example")
+
+    def test_command_line_agrees(self):
+        self.assertEqual(scan_repo.main(["--quiet"]), 0)
+
+
+class TestScannerCatchesProblems(unittest.TestCase):
+    """Plant one problem of each kind in a temp folder; the scanner must report each."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, rel, text="", size=None):
+        path = os.path.join(self.root, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text if size is None else "x" * size)
+        return path
+
+    def test_each_check_fires(self):
+        # Fixture strings are split with + so this file does not trip the real repo scan.
+        claim = self.write("src/app_text.md", "Our tool is production ready.\n")  # allow-phrase
+        allowed = self.write("src/ok.md", "Never say production ready.  allow-phrase\n")
+        key = self.write("server/config.py", 'API_KEY = "' + "abcdefghijklmnop1234" + '"\n')
+        env = self.write("server/.env", "LLM_API_KEY" + "=abcd1234efgh5678\n")
+        url = self.write("README.md", "Data: https://bucket.example.com/f?X-Amz-" + "Signature=abcdef0123456789abcdef\n")
+        raw = self.write("data/clinical.tsv", "sampleID\tER\n")
+        big = self.write("out/huge.json", size=scan_repo.MAX_FILE_BYTES + 1)
+        rows = self.write("out/rows.json", " ".join(f"TCGA-A1-{i:04d}" for i in range(25)))
+        mail = self.write("docs/team.md", "Contact someone@" + "university.edu\n")
+        safe_mail = self.write("docs/example.md", "Contact jane.doe@example.com\n")
+        code = self.write("src/plain.py", "key = load_settings()\nTOKEN_LIMIT = 4096\n")
+        self.assertEqual(scan_repo.check_secrets([code], self.root), [], "ordinary code is not a secret")
+        files = [claim, allowed, key, env, url, raw, big, rows, mail, safe_mail]
+
+        over = scan_repo.check_overclaiming(files, self.root)
+        self.assertEqual(len(over), 1)
+        self.assertIn("src/app_text.md", over[0])
+        secrets = "\n".join(scan_repo.check_secrets(files, self.root))
+        for rel in ["server/config.py", "server/.env", "README.md"]:
+            self.assertIn(rel, secrets)
+        raw_problems = "\n".join(scan_repo.check_raw_data(files, self.root))
+        for rel in ["data/clinical.tsv", "out/huge.json", "out/rows.json"]:
+            self.assertIn(rel, raw_problems)
+        personal = scan_repo.check_personal_info(files, self.root)
+        self.assertEqual(len(personal), 1)
+        self.assertIn("university.edu", personal[0])
+        self.assertEqual(scan_repo.check_gitignore(self.root, files), [".gitignore is missing"])
+        self.write(".gitignore", "*.tsv\n")
+        gi = "\n".join(scan_repo.check_gitignore(self.root, files))
+        self.assertIn("does not list .env", gi)
+        self.assertIn(".env would be committed", gi)
 
 
 if __name__ == "__main__":
