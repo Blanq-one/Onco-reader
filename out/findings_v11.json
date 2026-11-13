@@ -16,11 +16,12 @@
     "min_events": 20,
     "min_group_size": 30
   },
-  "guardrails_source": "built-in fallback (temporary, replace with D's module)",
+  "guardrails_source": "src/guardrails",
   "data_notes": [
     {
       "attribute": "ER status",
       "column_used": "breast_carcinoma_estrogen_receptor_status",
+      "chosen_by": "most recorded values",
       "primary_tumors_with_recorded_value": 1048,
       "primary_tumors": 1101,
       "alternatives": [
@@ -33,6 +34,7 @@
     {
       "attribute": "PR status",
       "column_used": "breast_carcinoma_progesterone_receptor_status",
+      "chosen_by": "most recorded values",
       "primary_tumors_with_recorded_value": 1047,
       "primary_tumors": 1101,
       "alternatives": [
@@ -45,6 +47,7 @@
     {
       "attribute": "HER2 status",
       "column_used": "lab_proc_her2_neu_immunohistochemistry_receptor_status",
+      "chosen_by": "most recorded values",
       "primary_tumors_with_recorded_value": 919,
       "primary_tumors": 1101,
       "alternatives": [
@@ -57,6 +60,7 @@
     {
       "attribute": "pathologic stage",
       "column_used": "pathologic_stage",
+      "chosen_by": "most recorded values",
       "primary_tumors_with_recorded_value": 1075,
       "primary_tumors": 1101,
       "alternatives": [
@@ -69,6 +73,7 @@
     {
       "attribute": "histological type",
       "column_used": "histological_type",
+      "chosen_by": "most recorded values",
       "primary_tumors_with_recorded_value": 1096,
       "primary_tumors": 1101,
       "alternatives": []
@@ -76,6 +81,7 @@
     {
       "attribute": "PAM50 subtype",
       "column_used": "PAM50Call_RNAseq",
+      "chosen_by": "most recorded values",
       "primary_tumors_with_recorded_value": 844,
       "primary_tumors": 1101,
       "alternatives": [
@@ -92,6 +98,7 @@
     {
       "attribute": "gender",
       "column_used": "gender",
+      "chosen_by": "most recorded values",
       "primary_tumors_with_recorded_value": 1097,
       "primary_tumors": 1101,
       "alternatives": []
@@ -125,7 +132,7 @@
           "n_after": 1048
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -170,7 +177,7 @@
           "n_after": 808
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -215,7 +222,7 @@
           "n_after": 164
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -261,7 +268,7 @@
           "n_after": 164
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -317,7 +324,7 @@
           "n_after": 82
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -363,7 +370,7 @@
           "n_after": 20
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -409,7 +416,7 @@
           "n_after": 622
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Survival presence says nothing about follow-up length; events are overall-survival deaths.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is. Survival presence says nothing about follow-up length; events are overall-survival deaths.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -460,7 +467,7 @@
           "n_after": 41
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Survival presence says nothing about follow-up length; events are overall-survival deaths.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is. Survival presence says nothing about follow-up length; events are overall-survival deaths.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -486,30 +493,30 @@
           "clinical.tsv",
           "sample_manifest.csv"
         ],
-        "calculation": "PAM50 subtype among primary tumor samples: recorded for 844 of 1101. Groups (samples, OS deaths): luma 421 (55 deaths); lumb 192 (32 deaths); basal 141 (19 deaths); her2 67 (14 deaths); normal 23 (5 deaths). Smallest group: normal with 23 samples and 5 deaths. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)).",
+        "calculation": "PAM50 subtype among primary tumor samples: recorded for 844 of 1101. Groups (samples, OS deaths): Luminal A 421 (55 deaths); Luminal B 192 (32 deaths); Basal-like 141 (19 deaths); HER2-enriched 67 (14 deaths); Normal-like 23 (5 deaths). Smallest group: Normal-like with 23 samples and 5 deaths. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)).",
         "breakdown": [
           {
-            "group": "luma",
+            "group": "Luminal A",
             "n": 421,
             "events": 55
           },
           {
-            "group": "lumb",
+            "group": "Luminal B",
             "n": 192,
             "events": 32
           },
           {
-            "group": "basal",
+            "group": "Basal-like",
             "n": 141,
             "events": 19
           },
           {
-            "group": "her2",
+            "group": "HER2-enriched",
             "n": 67,
             "events": 14
           },
           {
-            "group": "normal",
+            "group": "Normal-like",
             "n": 23,
             "events": 5
           }
@@ -527,7 +534,7 @@
           "n_after": 844
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": true,
       "review_reason": "The claim has no measurable threshold; a person must decide what counts as large enough. The smallest group has only 23 samples. 3 group(s) have fewer than 20 deaths, which is thin for survival comparisons.",
       "guardrail_flags": [
@@ -535,7 +542,7 @@
       ],
       "next_actions": [
         "State the minimum group size (and deaths) the comparison needs, then re-run.",
-        "Merge or drop the smallest group (normal, 23 samples) if the comparison needs balanced groups.",
+        "Merge or drop the smallest group (Normal-like, 23 samples) if the comparison needs balanced groups.",
         "Check why 257 of 1101 samples have no recorded PAM50 subtype."
       ],
       "robustness": null
@@ -613,7 +620,7 @@
           "n_after": 421
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -658,7 +665,7 @@
           "n_after": 203
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],
@@ -723,7 +730,7 @@
           "n_after": 1075
         }
       ],
-      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
       "needs_human_review": false,
       "review_reason": null,
       "guardrail_flags": [],

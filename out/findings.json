@@ -16,7 +16,7 @@
     "min_events": 20,
     "min_group_size": 30
   },
-  "guardrails_source": "built-in fallback (temporary, replace with D's module)",
+  "guardrails_source": "src/guardrails",
   "data_notes": [
     {
       "attribute": "ER status",
@@ -495,12 +495,12 @@
         "n_samples": 0,
         "denominator": 1101,
         "source_files": [],
-        "calculation": "not run: Stopped by guardrails: clinical_claim_blocked"
+        "calculation": "not run: Blocked: this reads as a treatment effect or survival-benefit claim, and this tool checks data readiness only."
       },
       "cohort_trace": [],
       "limitation": "This tool checks data readiness only. The request was stopped before any analysis.",
       "needs_human_review": true,
-      "review_reason": "Stopped by guardrails: clinical_claim_blocked",
+      "review_reason": "Blocked: this reads as a treatment effect or survival-benefit claim, and this tool checks data readiness only.",
       "guardrail_flags": [
         "clinical_claim_blocked"
       ],
@@ -520,12 +520,12 @@
         "n_samples": 0,
         "denominator": 1101,
         "source_files": [],
-        "calculation": "not run: Stopped by guardrails: individual_level_request_blocked"
+        "calculation": "not run: Blocked: the claim names a single participant barcode, and only cohort-level questions can be checked."
       },
       "cohort_trace": [],
       "limitation": "This tool checks data readiness only. The request was stopped before any analysis.",
       "needs_human_review": true,
-      "review_reason": "Stopped by guardrails: individual_level_request_blocked",
+      "review_reason": "Blocked: the claim names a single participant barcode, and only cohort-level questions can be checked.",
       "guardrail_flags": [
         "individual_level_request_blocked"
       ],

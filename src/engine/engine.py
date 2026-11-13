@@ -1,4 +1,4 @@
-r"""Evidence engine v1.1: turn report claims into checked findings (standard library only).
+r"""Evidence engine v1.1.2: turn report claims into checked findings (standard library only).
 
 Plain English: for each claim in a report it (1) runs the guardrail pre-check,
 (2) reads the claim as a small template, (3) computes the real numbers from the
@@ -36,12 +36,19 @@ sys.path.insert(0, os.path.join(ROOT, "contract"))
 
 from src.data import tcga_loader as L  # noqa: E402
 
-try:  # D's module, once it exists
+_GUARD_ERROR = None
+try:  # the real guardrails module
     from src.guardrails import check_claim as _check_claim  # type: ignore
     GUARDRAILS_SOURCE = "src/guardrails"
-except Exception:  # pragma: no cover
+except Exception as _exc:  # pragma: no cover
     _check_claim = None
-    GUARDRAILS_SOURCE = "built-in fallback (temporary, replace with D's module)"
+    _GUARD_ERROR = _exc
+    GUARDRAILS_SOURCE = "MISSING"
+try:
+    from src.guardrails import redact as _redact  # type: ignore
+except Exception:  # pragma: no cover
+    _redact = None
+ALLOW_FALLBACK = False  # set True only by --unsafe-no-guardrails (quick local tests, never for submission)
 
 try:
     import validate_findings as VF  # contract/validate_findings.py
@@ -354,6 +361,8 @@ NOUNS = r"(samples?|patients?|tumou?rs?|cases?|deaths?|events?)"
 def parse_quantifier(text):
     """Return dict(kind, comparator, threshold, reading) or None. May return kind 'invalid'."""
     low = text.lower().replace("\u2019", "'")
+    if re.search(r"(?:^|[\s(])[-\u2212]\s*\d[\d,]*(?:\.\d+)?\s*(?:%|percent|samples?|patients?|tumou?rs?|cases?|deaths?|events?)", low):
+        return {"kind": "invalid", "reading": "a negative number cannot describe a count or a share"}
     m = re.search(r"\b(fewer than|less than|under|below|more than|over|above|at least|at most|up to|exactly)\s+" + NUM +
                   r"(?!\d)(?!\s*(?:%|percent|per cent))(?:\s+(?:[\w+\-]+\s+){0,3}?" + NOUNS + r"\b)?", low)
     if m:
@@ -409,8 +418,15 @@ def parse_claim(text):
         if word in low:
             code, pop_label = c, label
     comparison = bool(re.search(r"compar|large enough|enough|sufficient|adequate", low))
+    analytic = re.search(r"\b(correlat\w*|associat\w*|predict\w*|caus\w*|relationship|risk factors?|impact\w*|effects?|differ\w*|linked to)\b", low)
     base = {"filters": filters, "conditions": c_layers, "cond_attrs": c_attrs, "quantifier": q,
             "pop_code": code, "pop_label": pop_label, "events": events}
+    if analytic:
+        known = list(OrderedDict.fromkeys([f["attr"] for f in filters] + recorded + c_attrs))
+        if known:
+            return dict(base, type="readiness", attr=known[0], association=True)
+        return {"type": "unanswerable", "outside": False,
+                "reason": "it asserts a relationship, effect or prediction, which this tool does not test, or it uses a field that is not loaded"}
     if recorded and not t_layers and not filters and comparison and q is None:
         return dict(base, type="readiness", attr=recorded[0])
     if t_layers or recorded or (events and not filters) or (events and filters):
@@ -532,8 +548,36 @@ def blank_finding(fid, text):
     ])
 
 
+REDACT_FLAGS = {"phi_like_input", "reidentification_blocked", "individual_level_request_blocked"}
+
+
+def _fallback_redact(text):
+    text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[email removed]", text)
+    text = re.sub(r"\bTCGA-[A-Za-z0-9]{2}-[A-Za-z0-9]{4}(?:-[A-Za-z0-9-]+)?", "[barcode removed]", text)
+    text = re.sub(r"\b\d{3}[- ]?\d{2}[- ]?\d{4}\b", "[number removed]", text)
+    text = re.sub(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b", "[date removed]", text)
+    text = re.sub(r"(?<!\d)(?:\+?\d[\d\s().-]{8,}\d)(?!\d)", "[number removed]", text)
+    return text
+
+
+def safe_claim_text(text, flags):
+    """Claim text as stored in findings. Claims blocked for personal details are stored redacted."""
+    if not REDACT_FLAGS & set(flags):
+        return text
+    if "phi_like_input" in flags:
+        return "[claim withheld: it contained personal details]"
+    if _redact is not None:
+        try:
+            out = _redact(text)
+            if isinstance(out, str):
+                return out
+        except Exception:
+            pass
+    return _fallback_redact(text)
+
+
 def blocked_finding(fid, text, flags, reason, total):
-    f = blank_finding(fid, text)
+    f = blank_finding(fid, safe_claim_text(text, flags))
     f["evidence"]["calculation"] = f"not run: {reason}"
     f["evidence"]["denominator"] = total
     f["limitation"] = "This tool checks data readiness only. The request was stopped before any analysis."
@@ -550,6 +594,8 @@ def blocked_finding(fid, text, flags, reason, total):
 def run_guardrails(text):
     if _check_claim is not None:
         return _check_claim(text)
+    if not ALLOW_FALLBACK:
+        raise RuntimeError("src/guardrails is missing or failed to import: " + repr(_GUARD_ERROR))
     low = (text or "").lower()
     flags = []
     if not (text or "").strip():
@@ -606,6 +652,10 @@ def readiness_finding(ctx, f, parsed, total):
                          {"step": f"has {ATTR_SPECS[key]['label']} recorded", "n_before": len(pop), "n_after": recorded}]
     f["limitation"] = limitation_for(parsed, [])
     reasons = ["The claim has no measurable threshold; a person must decide what counts as large enough."]
+    if parsed.get("association"):
+        ev["calculation"] = ("This tool does not test whether the relationship holds; it checks whether the groups are large enough to study it. "
+                             + ev["calculation"])
+        reasons = ["The claim asserts a relationship, which this tool does not test; a person must decide whether these group sizes are enough to study it."]
     if smallest["n"] < CFG["min_group_size"]:
         reasons.append(f"The smallest group has only {smallest['n']} samples.")
     if low_events:
@@ -780,15 +830,30 @@ def audit(ctx, claims, title):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Evidence engine v1.1")
+    ap = argparse.ArgumentParser(description="Evidence engine v1.1.2")
     ap.add_argument("--data-dir", default=L.DEFAULT_DIR)
     ap.add_argument("--report", help="text or markdown file with numbered or bulleted claims")
     ap.add_argument("--claim", action="append", default=[], help="a single claim (can repeat)")
     ap.add_argument("--out", default=os.path.join("out", "findings.json"))
     ap.add_argument("--notes", action="store_true", help="print which clinical columns were chosen")
+    ap.add_argument("--unsafe-no-guardrails", action="store_true",
+                    help="use the small built-in rules if src/guardrails is missing (quick local tests only, never for submission)")
     ap.add_argument("--column", action="append", default=[],
                     help="force a clinical column, e.g. --column her2=HER2_Final_Status_nature2012 (keys: " + ", ".join(ATTR_SPECS) + ")")
     args = ap.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):  # never crash on characters the console cannot show
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+    global ALLOW_FALLBACK, GUARDRAILS_SOURCE
+    if _check_claim is None:
+        if not args.unsafe_no_guardrails:
+            sys.exit("src/guardrails is missing or failed to import (" + repr(_GUARD_ERROR) + ").\n"
+                     "Copy the guardrails module into src/guardrails, or add --unsafe-no-guardrails for a quick local test only.")
+        ALLOW_FALLBACK = True
+        GUARDRAILS_SOURCE = "built-in fallback (limited, NOT for submission)"
+        print("WARNING: running without the real guardrails module.", file=sys.stderr)
     claims, title = list(args.claim), "Ad hoc claims"
     if args.report:
         with open(args.report, encoding="utf-8") as fh:
@@ -806,6 +871,9 @@ def main(argv=None):
         overrides[k] = v
     ctx = Context(args.data_dir, overrides)
     doc = audit(ctx, claims, title)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2)
     print(f"\nGuardrails: {GUARDRAILS_SOURCE}   Checksums: {ctx.checksums['status']}\n")
     if args.notes:
         print("Clinical columns chosen (recorded values among primary tumors):")
@@ -824,9 +892,6 @@ def main(argv=None):
         print(f"          {f['claim_text'][:90]}")
         for e in errs:
             print("          CONTRACT PROBLEM:", e)
-    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=2)
     print(f"\nSaved {args.out}  ({len(doc['findings'])} findings, {problems} contract problems)")
 
 
