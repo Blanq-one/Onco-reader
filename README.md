@@ -6,6 +6,8 @@ Paste a report that makes claims about the TCGA-BRCA breast cancer data. Evidenc
 
 **Demo video:** _link to be added_
 
+**Required product output:** [`out/audit.json`](out/audit.json), produced from the practice report (`app/samples/practice_brief.md`, the organizers' `products/research-claim-auditor/practice_brief.md`) by step 5 of [Setup and run](#setup-and-run). It passes the organizers' `format/validate.py`. To run on the unseen report, see [Judge's run on the sealed envelope](#judges-run-on-the-sealed-envelope).
+
 ## Who it is for
 
 A reviewer has been handed a report and asks: "can we trust this?" They don't want to redo the analysis. They want to know which claims the data backs, which it contradicts, and which it can't settle, with enough evidence to defend each call.
@@ -113,6 +115,33 @@ python3 ../challenge-ref/format/validate.py out/audit.json
 # 6. Start the app (Ctrl+C stops it), then open http://127.0.0.1:8000/app/
 python3 server/serve.py
 ```
+
+### Judge's run on the sealed envelope
+
+After steps 1 to 3 above, from the `hackathon` folder. Use the envelope number and four words from your card; the practice envelope is `practice orange meadow pilot lantern`.
+
+```powershell
+# 1. Open the envelope. On Windows, set UTF-8 first: unseal.py prints check marks, and without this it can stop
+#    with a UnicodeEncodeError (always when its output is piped or redirected).
+cd challenge-ref
+$env:PYTHONUTF8=1
+python envelopes\unseal.py 07 word1 word2 word3 word4   # your envelope number and its four words
+cd ..\onco-evidence
+
+# 2. Command line: audit.json for the envelope's report, then the organizers' validator
+python scripts\make_audit.py ..\challenge-ref\envelopes\opened\E07\claim_auditor_report.md --data-dir ..\challenge-ref\data\tcga-brca
+python ..\challenge-ref\format\validate.py out\audit.json
+
+# 3. Or in the app: start the server, open http://127.0.0.1:8000/app/, upload claim_auditor_report.md,
+#    press Extract claims, then Run the audit, then Download audit.json (on Results or Summary)
+python server\serve.py
+```
+
+On Mac or Linux, use `python3`, forward slashes, and `PYTHONUTF8=1 python3 envelopes/unseal.py ...`.
+
+- Claims are checked against the frozen release from `fetch.py` (release A). The envelope's `release/` folder is the input for Cohort Control Tower. The engine can read that folder too (`--data-dir ..\challenge-ref\envelopes\opened\E07\release`), but it has no `sources.csv`, so its checksum status is "unknown", and `make_audit.py` needs a `sources.csv` to write the file checksums into audit.json.
+- If the answer key lists each part of a sentence as its own claim, add `--split-subclaims` to `make_audit.py` or `serve.py` (see [below](#if-the-answer-key-splits-sentences)).
+- On our machine the whole run, from unsealing to a saved and validated audit.json, takes under 15 seconds.
 
 ### Server options
 
