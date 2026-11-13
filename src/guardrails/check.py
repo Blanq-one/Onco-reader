@@ -130,17 +130,23 @@ def explain(text):
     return out
 
 
-def redact(text):
-    """Return text with PHI-like spans replaced by [REDACTED].
+# Full participant or sample barcode, with any sample, vial or aliquot suffix (TCGA-A7-A0DB-01A-11R).
+_BARCODE_FULL = re.compile(r"\btcga-[a-z0-9]{2}-[a-z0-9]{4}(?:-[a-z0-9]+)*", re.I)
+REDACT_RULE_IDS = ("individual_patient_id",)  # besides every phi_ rule
 
-    The engine copies claim_text into findings.json verbatim; for claims flagged
-    phi_like_input it should store redact(text) instead (engine owner's change).
+
+def redact(text):
+    """Return text with identifying spans replaced by [REDACTED]: personal details
+    (every phi_ rule), participant barcodes and patient numbers.
+
+    Engine v1.1.2 stores this instead of the raw claim for findings blocked as
+    individual-level or re-identification (phi_like_input claims are withheld whole).
     """
     if not isinstance(text, str):
         return ""
-    t = normalise(text)
+    t = _BARCODE_FULL.sub("[REDACTED]", normalise(text))
     for rule in RULES:
-        if rule.id.startswith(PHI_RULE_PREFIX):
+        if rule.id.startswith(PHI_RULE_PREFIX) or rule.id in REDACT_RULE_IDS:
             for p in rule.patterns:
                 t = p.sub("[REDACTED]", t)
     return t

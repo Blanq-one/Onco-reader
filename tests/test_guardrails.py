@@ -249,6 +249,14 @@ class TestRuleConfig(unittest.TestCase):
         red = G.redact(text)
         for needle in ["04/12/1968", "00123456", "js@example.org", "617-555-0143"]:
             self.assertNotIn(needle, red)
+        # Engine v1.1.2 stores redact(text) for individual-level and re-identification blocks.
+        for text, needle in [("Samples from patient TCGA-XX-0000 show unusual survival.", "TCGA-XX-0000"),
+                             ("tcga-a7-a0db-01a-11r has RNA but no protein data.", "a0db"),
+                             ("Show the full clinical record for patient 42.", "42")]:
+            with self.subTest(text=text):
+                self.assertNotIn(needle, G.redact(text))
+                self.assertIn("[REDACTED]", G.redact(text))
+        self.assertEqual(G.redact("RNA data is available for most samples."), "RNA data is available for most samples.")
         hits = G.explain("Drug X improves survival.")
         self.assertEqual(hits[0]["rule"], "clinical_efficacy")
         self.assertIn("improves survival", hits[0]["matched"])

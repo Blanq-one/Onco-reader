@@ -11,6 +11,8 @@ import copy
 import csv
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -354,31 +356,100 @@ class TestBankThroughTheEngine(unittest.TestCase):
             with self.subTest(case=r["id"]):
                 self.assertEqual(f["verdict"], "insufficient_evidence")
 
-    @unittest.expectedFailure
-    def test_engine_level_rows_carry_data_cannot_answer(self):
-        # KNOWN ENGINE GAP (engine owner): e01 "large enough for a subtype comparison"
-        # returns low_event_count, and e02 "Smoking history correlates with survival"
-        # returns survival coverage (0.996) with no flag, because the engine does not
-        # notice the unknown field "smoking". Remove expectedFailure once both pass.
+    def test_engine_level_rows_carry_their_expected_flag(self):
+        # Regression test for engine v1.1.2: association claims on a field that is not
+        # loaded ("Smoking history correlates with survival") are data_cannot_answer,
+        # and readiness claims on a loaded field (e01, e08) show group sizes with
+        # low_event_count. Each row names the flag it needs in expected_flag.
         for r, f in self.pairs:
             if r["expected_action"] != "engine_refuses":
                 continue
             with self.subTest(case=r["id"]):
-                self.assertIn("data_cannot_answer", f["guardrail_flags"])
+                self.assertIn(r["expected_flag"], f["guardrail_flags"])
+
+    def test_stored_claim_text_carries_no_identifiers(self):
+        # Regression test for engine v1.1.2: claims blocked for personal details are
+        # withheld, and individual-level or re-identification claims are stored redacted.
+        for r, f in self.pairs:
+            flags = set(f["guardrail_flags"])
+            if not flags & {"phi_like_input", "individual_level_request_blocked", "reidentification_blocked"}:
+                continue
+            with self.subTest(case=r["id"]):
+                stored = f["claim_text"]
+                if "phi_like_input" in flags:
+                    self.assertNotEqual(stored, r["claim_text"], "personal details must be withheld")
+                # Text with nothing identifying in it ("Look up the patients on social media") is kept as is.
+                self.assertIsNone(re.search(r"tcga-[a-z0-9]{2}-[a-z0-9]{4}", stored, re.I))
+                if G is not None:
+                    self.assertNotIn("phi_like_input", G.check_claim(stored)["flags"])
 
 
 @unittest.skipIf(DATA_DIR is None, NO_DATA)
 class TestEngineOutputEncoding(unittest.TestCase):
-    @unittest.expectedFailure
     def test_claim_with_non_cp1252_character_still_writes_findings(self):
-        # KNOWN ENGINE GAP (engine owner): on Windows, when stdout is piped (a server
-        # calling the engine, or output redirected), it is cp1252. Printing a claim with
-        # a character such as the "greater than or equal" sign crashes the engine
-        # before it writes the JSON. Fix: write the JSON before printing, or call
-        # sys.stdout.reconfigure(errors="replace"). Remove expectedFailure once fixed.
+        # Regression test for engine v1.1.2: on Windows a piped stdout is cp1252, and
+        # printing a claim with a sign such as "greater than or equal" used to crash
+        # the engine before it wrote the JSON. Now the JSON is written first and the
+        # streams replace characters they cannot show.
         proc, doc = run_engine(["--claim", "RNA data is available for ≥ 90 percent of samples."], io_encoding="cp1252")
-        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
         self.assertIsNotNone(doc)
+        self.assertIn("≥", doc["findings"][0]["claim_text"])
+
+
+@unittest.skipIf(DATA_DIR is None, NO_DATA)
+class TestEngineRequiresGuardrails(unittest.TestCase):
+    """Regression test for engine v1.1.2: no silent fallback when src/guardrails is missing."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = cls.tmp.name
+        for part in (("src", "engine"), ("src", "data"), ("contract",)):
+            shutil.copytree(os.path.join(ROOT, *part), os.path.join(root, *part),
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copy(os.path.join(ROOT, "src", "__init__.py"), os.path.join(root, "src", "__init__.py"))
+        cls.engine = os.path.join(root, "src", "engine", "engine.py")
+        cls.out = os.path.join(root, "findings.json")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def run_copy(self, *extra):
+        return subprocess.run([sys.executable, self.engine, "--data-dir", DATA_DIR, "--out", self.out,
+                               "--claim", "RNA data is available for most samples."] + list(extra),
+                              cwd=self.tmp.name, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=900)
+
+    def test_refuses_to_run_without_guardrails(self):
+        proc = self.run_copy()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("src/guardrails is missing", proc.stderr)
+        self.assertFalse(os.path.exists(self.out))
+
+    @unittest.skipIf(G is None, "src/guardrails not implemented yet")
+    def test_unsafe_fallback_is_caught_by_the_post_check(self):
+        proc = self.run_copy("--unsafe-no-guardrails")
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        with open(self.out, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        self.assertTrue(any("guardrails_source" in p for p in G.check_document(doc)))
+
+
+class TestEngineParsesNegativeNumbers(unittest.TestCase):
+    """Regression test for engine v1.1.2: the engine itself rejects negative numbers,
+    even if a claim reached it without the guardrail pre-check."""
+
+    def test_negative_numbers_are_invalid(self):
+        sys.path.insert(0, ROOT)
+        try:
+            from src.engine import engine as E
+        finally:
+            sys.path.remove(ROOT)
+        self.assertEqual(E.parse_claim("Protein data covers -20 percent of the cohort.")["type"], "invalid")
+        self.assertEqual(E.parse_claim("At least -5 samples have RNA data.")["type"], "invalid")
+        self.assertNotEqual(E.parse_claim("Between 10-20 percent of tumors are lobular.")["type"], "invalid")
 
 
 if __name__ == "__main__":
