@@ -605,5 +605,82 @@ class TestSplitSubclaimsPracticeBrief(unittest.TestCase):
                 self.assertEqual(VALIDATOR.check(path), [], split)
 
 
+class TestClaimTextVerbatim(unittest.TestCase):
+    """claim_text is the report's own sentence, so a checker that matches claims by text finds them."""
+
+    def test_per_sentence_claim_text_is_the_source_sentence(self):
+        doc = make_doc()
+        for split in (False, True):
+            f = by_id(AJ.build_audit(doc, FILES, split_subclaims=split))
+            for src in (doc["findings"][0], doc["findings"][2]):  # single-part sentences: the same either way
+                self.assertEqual(f[src["id"]]["claim_text"], src["source_sentence"])
+        f = by_id(AJ.build_audit(doc, FILES, split_subclaims=False))
+        self.assertEqual(f["claim-002"]["claim_text"], doc["findings"][1]["source_sentence"])
+        # the trimmed tail stays in claim_text; the engine's shorter wording is kept in the evidence
+        self.assertTrue(f["claim-003"]["claim_text"].endswith("which suggests more."))
+        self.assertIn("Checked as: " + doc["findings"][2]["claim_text"], [r.get("note") for r in f["claim-003"]["evidence"]])
+
+    def test_redacted_source_sentence_is_kept_redacted(self):
+        doc = make_doc()
+        withheld = "[claim withheld: it contained personal details]"
+        doc["findings"][2]["source_sentence"] = withheld
+        self.assertEqual(by_id(AJ.build_audit(doc, FILES))["claim-003"]["claim_text"], withheld)
+
+    def test_split_parts_use_engine_wording_and_quote_the_sentence(self):
+        doc = make_doc()
+        f = by_id(AJ.build_audit(doc, FILES, split_subclaims=True))
+        sentence = doc["findings"][1]["source_sentence"]
+        for fid, part in (("claim-002.1", 0), ("claim-002.2", 1)):
+            self.assertEqual(f[fid]["claim_text"], doc["findings"][1]["evidence"]["sub_checks"][part]["claim"])
+            self.assertIn("The whole sentence as written in the report: " + sentence, [r.get("note") for r in f[fid]["evidence"]])
+
+
+@unittest.skipIf(DATA_DIR is None, "TCGA-BRCA data not found")
+class TestClaimTextFromAReport(unittest.TestCase):
+    REPORT = ("# A test report\n\n"
+              "*An italic note that is not a claim.*\n\n"
+              "Of the 1,101 primary tumors in the release, 535 have survival, mutation, copy number,\n"
+              "RNA and protein data. Luminal A is the largest RNA subtype, accounting for about 62% of\n"
+              "primary tumors with an RNA subtype call.\n\n"
+              "Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy, "
+              "which suggests protein data could guide treatment research.\n\n"
+              "Patient TCGA-A1-A0SB had about 500 ER-positive samples.\n\n"
+              "There are 7 metastatic and 139 normal-tissue samples.\n")
+
+    @classmethod
+    def setUpClass(cls):
+        from src.engine import engine as E
+        claims, skipped = E.extract_claims(cls.REPORT)
+        cls.doc = E.audit(E.Context(DATA_DIR), claims, "test.md", skipped)
+        cls.flat = re.sub(r"\s+", " ", cls.REPORT)
+
+    def test_every_claim_text_is_verbatim_from_the_report(self):
+        a = AJ.build_audit(self.doc, AJ.read_sources(DATA_DIR), split_subclaims=False)
+        for f in a["findings"]:
+            if "withheld" in f["claim_text"] or "removed" in f["claim_text"] or "REDACTED" in f["claim_text"]:
+                self.assertNotIn("TCGA-A1-A0SB", f["claim_text"])  # personal details stay redacted
+                continue
+            self.assertIn(f["claim_text"], self.flat, f["id"])
+        self.assertTrue(any("which suggests protein data" in f["claim_text"] for f in a["findings"]))  # tail kept
+        self.assertTrue(any("redact" in f["claim_text"].lower() or "removed" in f["claim_text"] or "withheld" in f["claim_text"]
+                            for f in a["findings"]), [f["claim_text"] for f in a["findings"]])
+
+    def test_split_parts_quote_a_verbatim_sentence(self):
+        a = AJ.build_audit(self.doc, AJ.read_sources(DATA_DIR), split_subclaims=True)
+        parts = [f for f in a["findings"] if "." in f["id"]]
+        self.assertGreaterEqual(len(parts), 6)  # three two-part sentences
+        for f in parts:
+            quote = next(r["note"] for r in f["evidence"] if (r.get("note") or "").startswith("The whole sentence as written"))
+            self.assertIn(quote.split(": ", 1)[1], self.flat, f["id"])
+
+    @unittest.skipIf(VALIDATOR is None, NO_VALIDATOR)
+    def test_both_settings_pass_the_organizers_validator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for split in (False, True):
+                path = os.path.join(tmp, f"audit_{split}.json")
+                AJ.write_json(AJ.build_audit(self.doc, AJ.read_sources(DATA_DIR), split_subclaims=split), path)
+                self.assertEqual(VALIDATOR.check(path), [], split)
+
+
 if __name__ == "__main__":
     unittest.main()
