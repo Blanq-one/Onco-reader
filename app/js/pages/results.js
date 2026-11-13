@@ -1,6 +1,8 @@
 import { h } from '../util.js';
 import { state, findings, saveFilters, FLAG_TEXT, isBlocked, hasNumber } from '../state.js';
-import { verdictBadge, flagChips, headlineText, factLine } from '../ui.js';
+import { verdictBadge, flagChips, headlineText, factLine, plainResult, exportButtons, forRoles } from '../ui.js';
+import { decisionPanel } from '../decisionPanel.js';
+import { filesOf } from './claim.js';
 import { pct, plural } from '../util.js';
 
 let active = -1;
@@ -24,12 +26,13 @@ function apply() {
 export function resultsPage() {
   const root = h('div', { class: 'page', 'data-title': 'Results' });
   const all = findings();
-  root.append(h('h1', {}, 'Results'));
+  root.append(h('div', { class: 'title-row' }, h('h1', {}, 'Results'), exportButtons('Download the audit')));
   if (!all.length) {
     root.append(h('div', { class: 'empty' }, h('div', { class: 'ic', 'aria-hidden': 'true' }, '\u{1F4ED}'), h('h2', {}, 'No claims in this file'),
       h('p', { class: 'muted' }, 'The findings file loaded but holds no claims.'), h('a', { class: 'btn primary', href: '#/' }, 'Back to Start')));
     return root;
   }
+  root.append(decisionPanel('results'));
   const n = (v) => all.filter((x) => x.verdict === v).length;
   const stat = (cls, num, label) => h('div', { class: 'stat ' + cls }, h('b', {}, String(num)), h('span', {}, label));
   root.append(h('div', { class: 'strip', role: 'group', 'aria-label': 'Summary' },
@@ -82,8 +85,12 @@ export function resultsPage() {
     return h('li', { class: 'claim-row' + (i === active ? ' active' : ''), 'data-i': i },
       h('div', { class: 'pick no-print' }, cb),
       h('a', { class: 'claim-link', href: '#/claim/' + encodeURIComponent(x.id) }, verdictBadge(x),
-        h('div', { class: 'text' }, h('div', {}, x.claim_text), factLine(x) ? h('div', { class: 'muted', style: 'font-size:.9rem' }, factLine(x)) : null, h('div', { class: 'meta' }, h('span', { class: 'chip' }, x.id), flagChips(x))),
-        h('div', { class: 'num' }, hl ? [hl, h('small', {}, pct(x.evidence.n_samples, x.evidence.denominator))] : h('small', {}, isBlocked(x) ? 'No number' : 'No number available'))));
+        h('div', { class: 'text' }, h('div', {}, x.claim_text),
+          h('div', { class: 'plain-line' }, plainResult(x)),
+          !x.correct_value && factLine(x) ? h('div', { class: 'muted', style: 'font-size:.9rem', 'data-for': forRoles('researcher', 'datause') }, factLine(x)) : null,
+          filesOf(x).length ? h('div', { class: 'muted mono', style: 'font-size:.8rem', 'data-for': forRoles('engineer') }, 'Files: ' + filesOf(x).join(', ')) : null,
+          h('div', { class: 'meta' }, h('span', { class: 'chip' }, x.id), flagChips(x))),
+        h('div', { class: 'num', 'data-for': forRoles('researcher', 'engineer') }, hl ? [hl, h('small', {}, pct(x.evidence.n_samples, x.evidence.denominator))] : h('small', {}, isBlocked(x) ? 'No number' : 'No number available'))));
   }
   draw();
   return root;

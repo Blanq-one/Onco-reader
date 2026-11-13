@@ -1,5 +1,5 @@
 import { h, store, toast, reduceMotion } from './util.js';
-import { state, dataParam, loadData, byId, findings } from './state.js';
+import { state, dataParam, loadData, byId, findings, ROLES, getRole, setRole } from './state.js';
 import { startPage, aboutPage, notFoundPage } from './pages/start.js';
 import { resultsPage, resultsShortcut } from './pages/results.js';
 import { claimPage, claimShortcut } from './pages/claim.js';
@@ -26,10 +26,23 @@ function buildShell() {
     menuBtn,
     h('div', { class: 'top-menu', id: 'top-menu' },
       h('nav', { 'aria-label': 'Main' }, NAV.map(([href, label]) => h('a', { href, 'data-nav': href }, label))),
+      roleSwitcher(),
       h('button', { class: 'btn', type: 'button', id: 'theme', onclick: toggleTheme }, ''),
       h('button', { class: 'btn', type: 'button', 'aria-label': 'Keyboard shortcuts', onclick: openHelp }, '?', h('span', { class: 'phone-only', 'aria-hidden': 'true' }, ' Keyboard shortcuts'))));
   setThemeLabel();
   document.body.append(helpDialog());
+}
+// Same findings, different detail: see ROLES in state.js. The choice is remembered in this browser.
+function roleSwitcher() {
+  const sel = h('select', { id: 'role-select', 'aria-describedby': 'role-help' },
+    Object.entries(ROLES).map(([k, r]) => h('option', Object.assign({ value: k }, k === getRole() ? { selected: true } : {}), r.label)));
+  sel.addEventListener('change', () => {
+    const r = setRole(sel.value);
+    document.getElementById('role-help').textContent = ROLES[r].sees;
+    toast('Showing the ' + ROLES[r].label.toLowerCase() + ' view: ' + ROLES[r].sees + '.');
+  });
+  return h('div', { class: 'role-switch' }, h('label', { for: 'role-select' }, 'View as'), sel,
+    h('span', { id: 'role-help', class: 'sr' }, ROLES[getRole()].sees));
 }
 function setMenu(open, refocus) {
   const top = document.getElementById('topbar'), b = document.getElementById('menu-btn');
@@ -86,10 +99,10 @@ function route() {
   if (r.path === '/') view = startPage();
   else if (r.path === '/extract') ({ view, crumbs } = extractPage());
   else if (r.path === '/results') view = resultsPage();
-  else if ((m = r.path.match(/^\/claim\/([^/]+)$/)) && byId(decodeURIComponent(m[1]))) ({ view, crumbs } = claimPage(byId(decodeURIComponent(m[1]))));
+  else if ((m = r.path.match(/^\/claim\/([^/]+)$/)) && byId(decodeURIComponent(m[1]))) ({ view, crumbs } = claimPage(byId(decodeURIComponent(m[1])), r.q));
   else if (r.path === '/compare') ({ view, crumbs } = comparePage(r.q));
   else if (r.path === '/review') ({ view, crumbs } = reviewPage(r.q));
-  else if (r.path === '/summary') view = summaryPage();
+  else if (r.path === '/summary') view = summaryPage(r.q);
   else if (r.path === '/about') view = aboutPage();
   else view = notFoundPage();
 
@@ -122,11 +135,12 @@ document.addEventListener('keydown', (e) => {
   const p = current.path;
   const ids = findings().map((f) => f.id);
   if (p === '/results') resultsShortcut(e);
-  else if (p === '/claim') claimShortcut(e, current.id, ids);
+  else if (p === '/claim') claimShortcut(e, current.id, ids, parseHash().q.get('from'));
   else if (e.key === 'c' && p !== '/compare') go('#/compare');
 });
 
 (async function init() {
+  setRole(getRole());
   buildShell();
   if (dataParam()) await loadData();
   if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#/');

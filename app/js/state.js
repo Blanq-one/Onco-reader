@@ -71,6 +71,24 @@ export const hasNumber = (f) => !isBlocked(f) && !cannotAnswer(f) && f.evidence.
 export const minGroup = () => (state.data.interpretation_config || {}).min_group_size ?? 30;
 export const minEvents = () => (state.data.interpretation_config || {}).min_events ?? 20;
 
+// Role views: every role sees the same findings; a role only changes which details are shown.
+// 'all' shows everything (the default, so a first-time viewer misses nothing). Limitations are never hidden.
+export const ROLES = {
+  all: { label: 'All details', sees: 'every detail for every role' },
+  leader: { label: 'Program leader', name: 'program leader', sees: 'verdicts, the decision and a one-sentence result for each claim' },
+  researcher: { label: 'Researcher', name: 'researcher', sees: 'adds correct values, calculations and the parts of each sentence' },
+  datause: { label: 'Data-use reviewer', name: 'data-use reviewer', sees: 'adds limitations, review reasons, flags and safety messages' },
+  engineer: { label: 'Data engineer', name: 'data engineer', sees: 'adds columns used, source files, checksums and the cohort trace' },
+};
+export const REVIEW_ROLES = ['leader', 'researcher', 'datause', 'engineer'];
+export function getRole() { const r = store('en.role'); return ROLES[r] ? r : 'all'; }
+export function setRole(r) {
+  const role = ROLES[r] ? r : 'all';
+  store('en.role', role);
+  document.documentElement.dataset.role = role;
+  return role;
+}
+
 export const decisions = () => store('en.decisions') || {};
 // A claim stopped by a guardrail has no result to override. A reviewer may only accept it as
 // insufficient evidence or ask for more evidence. Same rule and same message as build_review in
@@ -85,6 +103,8 @@ export function decisionAllowed(f, d) {
 export function decide(id, patch) {
   const all = decisions();
   const next = Object.assign({}, all[id], patch, { at: new Date().toISOString() });
+  const role = getRole();
+  if (role !== 'all') next.reviewer_role = ROLES[role].name;
   if (!decisionAllowed(byId(id), next)) return false;
   all[id] = next;
   store('en.decisions', all);
@@ -100,6 +120,11 @@ export function reviewStatus(f) {
   if (d.decision === 'approve') return 'accepted';
   return 'pending';
 }
+// The verdict after review: the reviewer's verdict when they overrode it, else the machine verdict.
+export function effectiveVerdict(f) {
+  return reviewStatus(f) === 'overridden' ? (decisions()[f.id] || {}).verdict || f.verdict : f.verdict;
+}
+
 // Throws Error(id + ': ' + BLOCKED_OVERRIDE_ERROR) if a saved decision overrides a blocked claim.
 export function reviewJson() {
   const d = state.data, dec = decisions();

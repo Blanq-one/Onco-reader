@@ -1,6 +1,8 @@
 import { h, fmtNum, fmtValue, pct, plural, store } from '../util.js';
 import { state, findings, byId, isBlocked, hasNumber, decisions, reviewStatus, FLAG_TEXT, VERDICT } from '../state.js';
-import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, factLine, stackTable } from '../ui.js';
+import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, factLine, stackTable, plainResult, interpTag, forRoles, auditJsonText } from '../ui.js';
+import { decisionPanel } from '../decisionPanel.js';
+import { columnsOf, filesOf } from './claim.js';
 
 const enc = encodeURIComponent;
 
@@ -76,9 +78,11 @@ export function reviewPage(q) {
   root.append(prog, bar, h('section', { class: 'card' },
     h('div', { class: 'row' }, verdictBadge(f), flagChips(f), h('span', { class: 'chip' }, f.id)),
     h('h2', { style: 'margin-top:8px' }, f.claim_text),
+    h('p', { class: 'plain' }, plainResult(f)),
     ...claimFacts(f),
-    hasNumber(f) ? h('p', {}, h('b', {}, headlineText(f)), ' (' + pct(f.evidence.n_samples, f.evidence.denominator) + ')  ', h('a', { href: '#/claim/' + enc(f.id) }, 'See the calculation')) : h('p', { class: 'muted' }, 'No number for this item. ', h('a', { href: '#/claim/' + enc(f.id) }, 'Open the full finding')),
-    f.needs_human_review ? h('p', {}, h('b', {}, 'Why it needs review: '), f.review_reason || 'No reason given.') : null,
+    hasNumber(f) ? h('p', {}, h('b', { 'data-for': forRoles('researcher', 'engineer') }, headlineText(f) + ' (' + pct(f.evidence.n_samples, f.evidence.denominator) + ')  '), h('a', { href: '#/claim/' + enc(f.id) + '?from=review' }, 'See the calculation and sources')) : h('p', { class: 'muted' }, 'No number for this item. ', h('a', { href: '#/claim/' + enc(f.id) + '?from=review' }, 'Open the full finding')),
+    f.needs_human_review ? h('p', { 'data-for': forRoles('datause') }, h('b', {}, 'Why it needs review: '), f.review_reason || 'No reason given.') : null,
+    f.needs_human_review ? h('p', { class: 'muted', 'data-for': forRoles('leader', 'researcher', 'engineer') }, 'A person must check this claim before it is used. The data-use reviewer view shows why.') : null,
     h('div', { class: 'limit' }, h('h2', {}, 'Limitation'), h('p', { style: 'margin:0' }, f.limitation || 'None given.')),
     reviewBlock(f, upd)),
     h('div', { class: 'pager' },
@@ -89,31 +93,77 @@ export function reviewPage(q) {
 }
 
 /* ---------- Summary ---------- */
-export function summaryPage() {
+// Every conclusion links to its claim card; the card's way back returns to the same place here (?at=).
+export function summaryPage(q) {
   const d = state.data, all = findings(), dec = decisions();
   const root = h('div', { class: 'page', 'data-title': 'Summary' });
-  const n = (v) => all.filter((x) => x.verdict === v).length;
+  const link = (f, text) => h('a', { class: text ? null : 'cid', href: '#/claim/' + enc(f.id) + '?from=summary' }, text || f.id);
+  const links = (list) => list.length ? list.map((f, i) => [i ? ', ' : '', link(f)]) : h('span', { class: 'muted' }, 'none');
   root.append(h('h1', {}, 'Summary'),
     h('p', { class: 'muted' }, (d.report_title || 'Report') + ' | ' + ((d.data_release && d.data_release.name) || 'unknown release') + ' | source ' + state.source + (d.is_mock ? ' | SAMPLE DATA' : '')),
     h('div', { class: 'row no-print', style: 'margin-bottom:16px' },
-      h('button', { class: 'btn primary', type: 'button', onclick: () => window.print() }, 'Print this page'), exportButtons()),
-    h('section', { class: 'card' }, h('h2', {}, 'Counts'), h('p', {}, plural(all.length, 'claim') + '. ' + n('supported') + ' supported, ' + n('contradicted') + ' contradicted, ' + n('insufficient_evidence') + ' insufficient evidence, ' + plural(all.filter((x) => x.needs_human_review).length, 'needs review', 'need review') + ', ' + all.filter(isBlocked).length + ' blocked. '
-      + plural(all.filter((x) => reviewStatus(x) === 'overridden').length, 'verdict') + ' overridden by a reviewer.')));
-  root.append(h('section', { class: 'card' }, h('h2', {}, 'Review decisions'),
+      h('button', { class: 'btn', type: 'button', onclick: () => window.print() }, 'Print this page'), exportButtons('Download the audit')),
+    decisionPanel('summary'));
+
+  const groups = [
+    ['Supported', (x) => !isBlocked(x) && x.verdict === 'supported'],
+    ['Contradicted', (x) => x.verdict === 'contradicted'],
+    ['Insufficient evidence (not blocked)', (x) => x.verdict === 'insufficient_evidence' && !isBlocked(x)],
+    ['Blocked by a safety check', isBlocked],
+    ['Need review', (x) => x.needs_human_review],
+    ['Verdict overridden by a reviewer', (x) => reviewStatus(x) === 'overridden'],
+  ];
+  root.append(h('section', { class: 'card', 'aria-labelledby': 'cnt-h' }, h('h2', { id: 'cnt-h' }, 'Counts'),
+    h('p', {}, plural(all.length, 'claim') + ' in this report. Each count links to the claims behind it.'),
+    h('ul', { class: 'counts' }, groups.map(([label, test]) => { const list = all.filter(test);
+      return h('li', {}, h('b', {}, String(list.length)), ' ' + label + ': ', links(list)); }))));
+
+  root.append(h('section', { class: 'card', 'aria-labelledby': 'rd-h' }, h('h2', { id: 'rd-h' }, 'Review decisions'),
     h('div', { class: 'table-wrap' }, stackTable(h('table', {}, h('thead', {}, h('tr', {}, ['Claim', 'Original verdict', 'Reviewer verdict', 'Status', 'Note'].map((t) => h('th', { scope: 'col' }, t)))),
       h('tbody', {}, all.map((f) => { const x = dec[f.id] || {}, st = reviewStatus(f);
-        return h('tr', { class: st === 'overridden' ? 'overridden' : null }, h('td', {}, h('a', { href: '#/claim/' + enc(f.id) }, f.id), ' ' + f.claim_text),
+        return h('tr', { class: st === 'overridden' ? 'overridden' : null }, h('td', {}, link(f), ' ' + f.claim_text),
           h('td', {}, vText(f.verdict)), h('td', {}, st === 'pending' || st === 'more_evidence_requested' ? 'none' : vText(x.verdict || f.verdict)),
           h('td', {}, st === 'overridden' ? '⚑ Overridden' : st === 'accepted' ? '✓ Accepted' : st === 'more_evidence_requested' ? 'More evidence requested' : 'Not reviewed yet'), h('td', {}, x.note || null)); }))))),
     h('a', { class: 'btn no-print', href: '#/review' }, 'Open the review queue')));
-  root.append(h('section', { class: 'card' }, h('h2', {}, 'All claims and limitations'),
-    all.map((f) => h('div', { style: 'margin-bottom:14px;break-inside:avoid' }, h('div', { class: 'row' }, verdictBadge(f), h('b', {}, f.id), headlineText(f) ? h('span', {}, headlineText(f)) : null), h('div', {}, f.claim_text),
-      factLine(f) ? h('div', {}, factLine(f)) : null,
-      h('div', { class: 'muted' }, 'Limitation: ' + (f.limitation || 'none given'))))));
-  root.append(h('section', { class: 'card' }, h('h2', {}, 'All next actions'),
-    all.some((f) => f.next_actions.length) ? all.filter((f) => f.next_actions.length).map((f) => h('div', {}, h('h3', {}, f.id + ': ' + f.claim_text), h('ul', {}, f.next_actions.map((a) => h('li', {}, a)))))
+
+  root.append(h('section', { class: 'card', 'aria-labelledby': 'all-h' }, h('h2', { id: 'all-h' }, 'All claims, results and limitations'),
+    all.map((f) => h('div', { class: 'sum-item', id: 'sum-' + f.id, tabindex: '-1' },
+      h('div', { class: 'row' }, verdictBadge(f), h('b', {}, link(f)),
+        headlineText(f) ? h('span', { 'data-for': forRoles('researcher', 'engineer') }, headlineText(f)) : null,
+        h('span', { class: 'chip-row', 'data-for': forRoles('datause') }, f.guardrail_flags.map((x) => h('span', { class: 'chip block' }, FLAG_TEXT[x] || x)))),
+      h('div', {}, link(f, f.claim_text)),
+      h('div', { class: 'plain-line' }, plainResult(f), ' ', link(f, 'Open the evidence')),
+      !f.correct_value && factLine(f) ? h('div', { 'data-for': forRoles('researcher', 'datause') }, factLine(f)) : null,
+      h('div', { class: 'muted' }, 'Limitation: ' + (f.limitation || 'none given')),
+      f.needs_human_review ? h('div', { 'data-for': forRoles('datause') }, 'Review reason: ' + (f.review_reason || 'none given')) : null,
+      h('div', { class: 'mono muted', 'data-for': forRoles('engineer') }, 'Files: ' + (filesOf(f).join(', ') || 'none') + (columnsOf(f).length ? '. Columns: ' + columnsOf(f).join(', ') : ''))))));
+
+  root.append(checksumCard(d));
+
+  root.append(h('section', { class: 'card', 'aria-labelledby': 'na-h' }, h('h2', { id: 'na-h' }, 'All next actions ', interpTag()),
+    all.some((f) => f.next_actions.length) ? all.filter((f) => f.next_actions.length).map((f) => h('div', {}, h('h3', {}, link(f, f.id + ': ' + f.claim_text)), h('ul', {}, f.next_actions.map((a) => h('li', {}, a)))))
       : h('p', { class: 'muted' }, 'No next actions.')));
   root.append(h('p', { class: 'muted' }, 'This tool checks data readiness only. It makes no clinical claims.'));
+  const at = q && q.get('at');
+  root.afterMount = () => {
+    const el = at && document.getElementById('sum-' + at);
+    if (el) { el.scrollIntoView({ block: 'center' }); el.focus({ preventScroll: true }); el.classList.add('flash'); }
+  };
   return root;
+}
+
+// For the data engineer: each data file's SHA-256 as written to audit.json, and whether they matched sources.csv.
+function checksumCard(d) {
+  const rel = d.data_release || {};
+  const slot = h('div', {}, h('p', { class: 'muted' }, 'Reading the file checksums from audit.json...'));
+  auditJsonText().then((t) => {
+    const r = ((JSON.parse(t).data || {}).releases || [])[0] || {};
+    slot.replaceChildren(h('p', { class: 'muted' }, 'Release "' + (r.name || 'unknown') + '" in audit.json lists ' + plural((r.files || []).length, 'file') + '.'),
+      h('div', { class: 'table-wrap' }, stackTable(h('table', {}, h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'File'), h('th', { scope: 'col' }, 'SHA-256'))),
+        h('tbody', {}, (r.files || []).map((x) => h('tr', {}, h('td', { class: 'mono' }, x.file), h('td', { class: 'mono' }, x.sha256))))))));
+  }).catch(() => slot.replaceChildren(h('p', { class: 'muted' }, 'audit.json is not available right now, so the file checksums cannot be shown.')));
+  return h('section', { class: 'card', 'aria-labelledby': 'ck-h', 'data-for': forRoles('engineer') }, h('h2', { id: 'ck-h' }, 'Data files and checksums'),
+    h('p', {}, 'Checksum status: ', h('b', {}, rel.checksum_status || 'unknown'),
+      rel.checksum_status === 'verified' ? '. Every data file matched the frozen checksums in sources.csv.' : '. The data files were not confirmed against sources.csv.'), slot);
 }
 void store;

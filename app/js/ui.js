@@ -1,5 +1,12 @@
 import { h, sv, pct, fmtNum, plural, toast } from './util.js';
-import { VERDICT, FLAG_TEXT, isBlocked, cannotAnswer, hasNumber, decisions, decide, decisionAllowed, BLOCKED_OVERRIDE_ERROR, reviewStatus, reviewJson, state, dataUrl, minGroup, minEvents } from './state.js';
+import { VERDICT, FLAG_TEXT, isBlocked, cannotAnswer, hasNumber, decisions, decide, decisionAllowed, BLOCKED_OVERRIDE_ERROR, reviewStatus, reviewJson, state, dataUrl, minGroup, minEvents, effectiveVerdict } from './state.js';
+import { nextStepExport } from './decision.js';
+
+// Role views (see ROLES in state.js): an element tagged data-for="researcher engineer" shows only in those role
+// views and in "All details"; untagged elements show for everyone. The CSS in app.css does the hiding.
+export const forRoles = (...roles) => roles.join(' ');
+// Recommendations are marked as interpretation, never as findings.
+export const interpTag = () => h('span', { class: 'interp', title: 'A suggestion drawn from the findings, not a finding itself' }, 'Interpretation');
 
 export function verdictBadge(f) {
   if (isBlocked(f)) return h('span', { class: 'badge v-blocked' }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '⛔'), 'Blocked');
@@ -7,10 +14,43 @@ export function verdictBadge(f) {
   return h('span', { class: 'badge v-' + f.verdict }, h('span', { class: 'ic', 'aria-hidden': 'true' }, v.icon), v.label);
 }
 export function flagChips(f) {
-  const out = f.guardrail_flags.map((x) => h('span', { class: 'chip ' + (x === 'low_event_count' ? 'warn' : 'block') }, FLAG_TEXT[x] || x));
+  const out = f.guardrail_flags.map((x) => h('span', { class: 'chip ' + (x === 'low_event_count' ? 'warn' : 'block'),
+    'data-for': x === 'low_event_count' ? forRoles('datause', 'researcher') : forRoles('datause') }, FLAG_TEXT[x] || x));
   if (f.needs_human_review) out.push(h('span', { class: 'chip review' }, 'Needs review'));
   const rc = reviewChip(f); if (rc) out.push(rc);
   return out;
+}
+// One plain-language sentence saying what the check found, for every role.
+const BLOCK_PLAIN = {
+  clinical_claim_blocked: 'it reads as a clinical claim (treatment, survival or prognosis), which this tool does not judge',
+  individual_level_request_blocked: 'it asks about an individual patient',
+  reidentification_blocked: 'it tries to identify people',
+  phi_like_input: 'it contains personal details',
+  prompt_injection_suspected: 'it contains an instruction aimed at the tool',
+  invalid_input: 'it is not a valid claim',
+};
+const firstSentence = (t) => { const m = String(t || '').match(/^.*?[.!?](?=\s|$)/); return (m ? m[0] : String(t || '')).trim(); };
+export function plainResult(f) {
+  let s;
+  const e = f.evidence, metric = String(e.metric_name || '');
+  if (isBlocked(f)) {
+    s = 'Not checked: a safety check stopped it because ' + BLOCK_PLAIN[f.guardrail_flags.find((x) => BLOCK_PLAIN[x])] + '.';
+  } else if (cannotAnswer(f)) {
+    s = 'Not checked: the data has no field that can answer it.';
+  } else if (metric.startsWith('survival_groups')) {
+    s = 'Not judged: this tool shows how many deaths each group has, not whether one group lives longer.';
+  } else if (f.verdict === 'supported') {
+    const share = /^(share_|coverage_|overlap_)/.test(metric) && e.denominator ? ' (' + pct(e.n_samples, e.denominator) + ')' : '';
+    s = 'The data agrees' + (hasNumber(f) ? ': ' + fmtNum(e.n_samples) + ' of ' + fmtNum(e.denominator) + share : '') + '.';
+  } else if (f.verdict === 'contradicted') {
+    const cv = f.correct_value && f.correct_value.text;
+    s = 'The data disagrees' + (cv ? ': it shows ' + cv : '') + '.';
+  } else {
+    const why = firstSentence(f.review_reason || f.missing_evidence || 'the claim cannot be settled with this data');
+    s = 'Not settled: ' + why.charAt(0).toLowerCase() + why.slice(1).replace(/[.!?]?$/, '.');
+  }
+  if (reviewStatus(f) === 'overridden') s += ' A reviewer changed the verdict to ' + (VERDICT[effectiveVerdict(f)] || {}).label + '.';
+  return s;
 }
 export function headlineText(f) {
   if (!hasNumber(f)) return null;
@@ -122,10 +162,10 @@ export function claimFacts(f) {
   const out = [];
   const subs = f.sub_checks || (f.evidence && f.evidence.sub_checks) || [];
   if (f.source_sentence) out.push(h('section', { class: 'card', 'aria-label': 'Source sentence' }, h('h2', {}, 'Source sentence'), h('blockquote', { class: 'src' }, f.source_sentence)));
-  if (f.correct_value && (f.correct_value.text || f.correct_value.value != null)) out.push(h('section', { class: 'card fact bad', 'aria-label': 'Correct value' }, h('h2', {}, 'Correct value from the data'),
+  if (f.correct_value && (f.correct_value.text || f.correct_value.value != null)) out.push(h('section', { class: 'card fact bad', 'aria-label': 'Correct value', 'data-for': forRoles('researcher') }, h('h2', {}, 'Correct value from the data'),
     h('p', { class: 'fact-v' }, f.correct_value.text || (f.correct_value.value + ' ' + (f.correct_value.unit || '')))));
-  if (f.missing_evidence) out.push(h('section', { class: 'card fact warn', 'aria-label': 'Missing evidence' }, h('h2', {}, 'Data that would be needed'), h('p', { style: 'margin:0' }, f.missing_evidence)));
-  if (subs.length) out.push(h('section', { class: 'card', 'aria-label': 'Parts of this sentence' }, h('h2', {}, 'This sentence has ' + plural(subs.length, 'part')),
+  if (f.missing_evidence) out.push(h('section', { class: 'card fact warn', 'aria-label': 'Missing evidence', 'data-for': forRoles('researcher', 'datause', 'engineer') }, h('h2', {}, 'Data that would be needed'), h('p', { style: 'margin:0' }, f.missing_evidence)));
+  if (subs.length) out.push(h('section', { class: 'card', 'aria-label': 'Parts of this sentence', 'data-for': forRoles('researcher') }, h('h2', {}, 'This sentence has ' + plural(subs.length, 'part')),
     h('ul', { class: 'subs' }, subs.map((s) => h('li', {}, verdictBadge({ verdict: s.verdict, guardrail_flags: [] }), h('span', {}, ' ' + s.claim),
       s.value != null ? h('small', { class: 'muted' }, ' (' + fmtNum(s.n_samples) + ' of ' + fmtNum(s.denominator) + ')') : null)))));
   return out;
@@ -141,24 +181,33 @@ export function saveBlob(text, name) {
   const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
   const a = h('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-export function exportButtons() {
+// audit.json in the shared format: the server makes it for a live report; demo mode uses the precomputed file.
+// Kept per report, so the download and the data engineer's checksum table share one request.
+let auditCache = { key: null, text: null };
+export async function auditJsonText() {
+  const live = state.mode === 'live' && state.reportText;
+  const key = live ? 'live|' + state.reportTitle + '|' + state.reportText : 'demo|' + state.source;
+  if (auditCache.key === key && auditCache.text) return auditCache.text;
+  const r = live
+    ? await fetch('/api/audit-json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report: state.reportText, title: state.reportTitle || undefined }) })
+    : await fetch(dataUrl('out/audit.json'), { cache: 'no-store' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  auditCache = { key, text: await r.text() };
+  return auditCache.text;
+}
+export function exportButtons(label) {
   const audit = h('button', { class: 'btn', type: 'button', onclick: async (ev) => {
     const b = ev.currentTarget; b.disabled = true;
-    try {
-      let r;
-      if (state.mode === 'live' && state.reportText) r = await fetch('/api/audit-json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report: state.reportText, title: state.reportTitle || undefined }) });
-      else r = await fetch(dataUrl('out/audit.json'), { cache: 'no-store' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      saveBlob(await r.text(), 'audit.json'); toast('audit.json downloaded');
-    } catch (e) { toast('audit.json is not available right now.'); }
+    try { saveBlob(await auditJsonText(), 'audit.json'); toast('audit.json downloaded'); } catch (e) { toast('audit.json is not available right now.'); }
     b.disabled = false;
   } }, 'Download audit.json');
   const review = h('button', { class: 'btn', type: 'button', onclick: () => {
     let doc;
     try { doc = reviewJson(); } catch (e) { toast('review.json not saved. ' + e.message + '.'); return; }
+    doc.next_step = nextStepExport();
     saveBlob(JSON.stringify(doc, null, 2) + '\n', 'review.json'); toast('review.json downloaded');
   } }, 'Download review.json');
-  return h('div', { class: 'row no-print' }, audit, review);
+  return h('div', { class: 'row no-print', role: 'group', 'aria-label': label || 'Downloads' }, audit, review);
 }
 export { pct };
 

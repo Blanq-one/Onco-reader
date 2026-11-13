@@ -37,6 +37,7 @@ export async function runAudit(signal) {
   setData(j, 'your report (live)');
   state.extract = keep; state.mode = 'live';
   store('en.decisions', {});
+  store('en.nextstep', null); // a new report starts with no recorded next step
   return j;
 }
 
