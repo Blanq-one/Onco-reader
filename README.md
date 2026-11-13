@@ -119,11 +119,13 @@ python3 server/serve.py
 - `--data-dir PATH`: the data folder. The default is `$TCGA_DATA_DIR`; otherwise `../challenge-ref/data/tcga-brca`.
 - `--port 8001`: use this if port 8000 is busy.
 - `--host`: the default is `127.0.0.1`, this computer only.
+- `--split-subclaims`: the app's audit.json download gets one finding per part of a multi-part sentence (see "If the answer key splits sentences" below).
 
 At startup the server prints:
 - whether the data passed its checksum checks;
 - whether the guardrails loaded;
-- whether PDF upload is on.
+- whether PDF upload is on;
+- whether audit.json has one finding per sentence or per part.
 
 If the guardrails module is missing, the server refuses to start.
 
@@ -182,7 +184,14 @@ To save `audit.json` from PowerShell, use `Invoke-WebRequest ... -OutFile audit.
 
 Some sentences hold more than one claim, for example "Luminal A is the largest RNA subtype, accounting for about 62% of tumors". The engine checks each part and gives the sentence its worst verdict. By default `audit.json` has **one finding per sentence**, with the parts listed in its evidence.
 
-If the organizers' answer key lists each part as its own claim, set `SPLIT_SUBCLAIMS = True` at the top of `src/export/audit_json.py`, then make `audit.json` again (`scripts/make_audit.py`, or restart the server for the app's download). Each part then becomes its own `claim_check` finding with its own `claim_text`, verdict and `correct_value`, with ids such as `claim-002.1` and `claim-002.2`. The sentence-level finding is left out for those sentences. Sentences with one claim come out the same either way. A part's `claim_text` is the part as the engine checked it. The full sentence, as written in the report, is quoted in that finding's evidence.
+If the organizers' answer key lists each part as its own claim, add `--split-subclaims` to the command, with no file to edit:
+
+```
+python scripts/make_audit.py REPORT --split-subclaims
+python server/serve.py --split-subclaims
+```
+
+The flag sets `SPLIT_SUBCLAIMS` (top of `src/export/audit_json.py`) for that run only. `/api/health` reports `split_subclaims`. Each part then becomes its own `claim_check` finding with its own `claim_text`, verdict and `correct_value`, with ids such as `claim-002.1` and `claim-002.2`. The sentence-level finding is left out for those sentences. Sentences with one claim come out the same either way. A part's `claim_text` is the part as the engine checked it. The full sentence, as written in the report, is quoted in that finding's evidence.
 
 Both settings pass the organizers' validator.
 

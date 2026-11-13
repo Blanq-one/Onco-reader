@@ -57,6 +57,8 @@ def main(argv=None):
     ap.add_argument("--release-name", default=AJ.DEFAULT_RELEASE, help="release name in audit.json (default: raw)")
     ap.add_argument("--team", default=AJ.DEFAULT_TEAM, help="producer.team in audit.json")
     ap.add_argument("--question", help="the question asked (default: built from the report name)")
+    ap.add_argument("--split-subclaims", action="store_true",
+                    help="audit.json gets one finding per part of a sentence that holds several claims, instead of one per sentence (sets SPLIT_SUBCLAIMS in src/export/audit_json.py for this run)")
     args = ap.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):  # never crash on characters the console cannot show
         try:
@@ -103,7 +105,8 @@ def main(argv=None):
     out = os.path.abspath(args.out)
     review_out = os.path.abspath(args.review_out) if args.review_out else os.path.join(os.path.dirname(out), "review.json")
     try:
-        audit = AJ.build_audit(doc, files, release=args.release_name, team=args.team, question=args.question)
+        audit = AJ.build_audit(doc, files, release=args.release_name, team=args.team, question=args.question,
+                               split_subclaims=True if args.split_subclaims else None)
         review = AJ.build_review(doc, decisions, audit_file=os.path.basename(out))
     except ValueError as err:
         return fail(f"cannot export: {err}")
@@ -120,7 +123,8 @@ def main(argv=None):
         print(f"{f['id']}  {f['claim_verdict']:<22} review={review_flag:<4}{extra}")
     counts = ", ".join(f"{k} {v}" for k, v in review["counts"].items() if v)
     n = len(audit["findings"])
-    print(f"\nSaved {out}  ({n} claim_check finding{'' if n == 1 else 's'})")
+    split = args.split_subclaims or AJ.SPLIT_SUBCLAIMS
+    print(f"\nSaved {out}  ({n} claim_check finding{'' if n == 1 else 's'}, one per {'part of each sentence' if split else 'sentence'})")
     print(f"Saved {review_out}  (review queue: {counts or 'empty'})")
     try:
         shown = os.path.relpath(out).replace(os.sep, "/")

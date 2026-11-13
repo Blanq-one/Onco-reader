@@ -342,7 +342,8 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(403, "requests from other web pages are refused")
         srv = self.server
         if path == "/api/health":
-            self._json(200, {"ok": True, "checksum_status": srv.ctx.checksums["status"], "pdf_text": pypdf is not None})
+            self._json(200, {"ok": True, "checksum_status": srv.ctx.checksums["status"], "pdf_text": pypdf is not None,
+                             "split_subclaims": bool(AJ.SPLIT_SUBCLAIMS)})
         elif path == "/api/pdf-text":
             self._pdf_text()
         elif path == "/api/extract":
@@ -506,7 +507,11 @@ def main(argv=None):
     ap.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"port (default {DEFAULT_PORT}; 0 picks a free one)")
     ap.add_argument("--host", default="127.0.0.1",
                     help="address to listen on (default 127.0.0.1, this computer only)")
+    ap.add_argument("--split-subclaims", action="store_true",
+                    help="audit.json gets one finding per part of a sentence that holds several claims, instead of one per sentence (sets SPLIT_SUBCLAIMS in src/export/audit_json.py for this run)")
     args = ap.parse_args(argv)
+    if args.split_subclaims:
+        AJ.SPLIT_SUBCLAIMS = True
     for stream in (sys.stdout, sys.stderr):  # never crash on characters the console cannot show
         try:
             stream.reconfigure(errors="replace", line_buffering=True)
@@ -544,6 +549,8 @@ def main(argv=None):
         files = None
         print(f"WARNING: cannot read sources.csv ({err.__class__.__name__}); /api/audit-json is off.")
     print(f"Guardrails: {E.GUARDRAILS_SOURCE}   PDF text: {'on (pypdf)' if pypdf else 'off (pypdf not installed)'}")
+    print("audit.json: " + ("one finding per part of each sentence (--split-subclaims)" if AJ.SPLIT_SUBCLAIMS
+                            else "one finding per sentence (add --split-subclaims for one per part)"))
 
     loopback_only = args.host in LOOPBACK
     try:

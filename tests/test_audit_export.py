@@ -682,5 +682,64 @@ class TestClaimTextFromAReport(unittest.TestCase):
                 self.assertEqual(VALIDATOR.check(path), [], split)
 
 
+@unittest.skipIf(DATA_DIR is None or not os.path.isfile(BRIEF), "TCGA-BRCA data or the practice brief not found")
+class TestSplitSubclaimsFlags(unittest.TestCase):
+    """--split-subclaims on make_audit.py and server/serve.py sets the switch for that run only."""
+
+    def make_audit(self, *extra):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "audit.json")
+            proc = subprocess.run([sys.executable, MAKE_AUDIT, BRIEF, "--data-dir", DATA_DIR, "--out", out, *extra],
+                                  cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                  env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=900)
+            self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+            if VALIDATOR is not None:
+                self.assertEqual(VALIDATOR.check(out), [])
+            return [f["id"] for f in read_json(out)["findings"]], proc.stdout
+
+    def test_make_audit_flag(self):
+        ids, out = self.make_audit("--split-subclaims")
+        self.assertEqual(ids, ["claim-001.1", "claim-001.2", "claim-002.1", "claim-002.2", "claim-003"])
+        self.assertIn("one per part of each sentence", out)
+        ids, out = self.make_audit()
+        self.assertEqual(ids, ["claim-001", "claim-002", "claim-003"])
+        self.assertIn("one per sentence", out)
+
+    def test_server_flag(self):
+        import http.client
+        import socket
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        proc = subprocess.Popen([sys.executable, os.path.join("server", "serve.py"), "--data-dir", DATA_DIR, "--port", str(port),
+                                 "--split-subclaims"], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+        try:
+            lines = []
+            for line in proc.stdout:  # wait until the server says where it listens
+                lines.append(line.decode("utf-8", "replace"))
+                if "Open the app" in lines[-1]:
+                    break
+            self.assertTrue(any("one finding per part of each sentence" in x for x in lines), "".join(lines))
+
+            def call(method, path, body=None):
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=300)
+                conn.request(method, path, body=json.dumps(body).encode() if body else None,
+                             headers={"Content-Type": "application/json"} if body else {})
+                r = conn.getresponse()
+                data = json.loads(r.read())
+                conn.close()
+                return data
+            self.assertTrue(call("GET", "/api/health")["split_subclaims"])
+            with open(BRIEF, encoding="utf-8") as fh:
+                audit = call("POST", "/api/audit-json", {"report": fh.read(), "title": "practice_brief.md"})
+            self.assertEqual([f["id"] for f in audit["findings"]],
+                             ["claim-001.1", "claim-001.2", "claim-002.1", "claim-002.2", "claim-003"])
+        finally:
+            proc.terminate()
+            proc.wait(timeout=30)
+            proc.stdout.close()
+
+
 if __name__ == "__main__":
     unittest.main()
