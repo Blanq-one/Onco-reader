@@ -144,6 +144,43 @@ def load_manifest(data_dir):
         return list(csv.DictReader(fh))
 
 
+# Barcode sample type code -> the sample_type value used in sample_manifest.csv
+SAMPLE_TYPE_NAMES = OrderedDict([("01", "Primary Tumor"), ("11", "Solid Tissue Normal"), ("06", "Metastatic")])
+
+
+def load_slide_manifest(data_dir):
+    """Rows of slide_manifest.csv (one row per slide), or None if the file is not there."""
+    path = os.path.join(data_dir, "slide_manifest.csv")
+    if not os.path.exists(path):
+        return None
+    with open(path, newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+
+def slide_kind_column(rows):
+    """The column that says what kind of slide a row is (diagnostic or frozen), found by its name."""
+    if not rows:
+        return None
+    header = list(rows[0].keys())
+    for name in header:
+        if name.strip().lower() == "slide_kind":
+            return name
+    for name in header:
+        if "kind" in name.lower() or "type" in name.lower():
+            return name
+    return None
+
+
+def slide_kind_group(kind):
+    """'diagnostic' for FFPE diagnostic slides, 'frozen' for frozen sections, else 'other'."""
+    k = (kind or "").strip().lower()
+    if "diagnostic" in k or "ffpe" in k:
+        return "diagnostic"
+    if "frozen" in k:
+        return "frozen"
+    return "other"
+
+
 # ---------- attrition ----------
 def starting_population(manifest, layers):
     """Primary tumor samples. Uses the manifest if present, else the union of sample-level files."""

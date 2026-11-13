@@ -99,7 +99,6 @@ LAYER_SOURCE = {name: spec["file"] for name, spec in L.LAYERS.items()}
 LAYER_SOURCE["slides"] = "sample_manifest.csv (slides_for_sample)"
 
 OTHER_DATASET_WORDS = r"\b(lung|colon|colorectal|kidney|prostate|ovarian|liver|brain|glioma|melanoma)\b"
-POPULATION_WORDS = [("normal tissue", "11", "normal tissue samples"), ("metasta", "06", "metastasis samples")]
 
 # ---- clinical attributes (candidate columns are tried and the best-populated one is used) ----
 ATTR_SPECS = OrderedDict([
@@ -183,9 +182,22 @@ class Context:
         self.checksums = L.verify_checksums(data_dir)
         self.os = self._load_os()
         self.attrs, self.attr_notes = self._load_attributes()
+        # sample type as the manifest states it (falls back to the barcode code when there is no manifest)
+        self.sample_type_of = ({r["sample_id"]: (r.get("sample_type") or "").strip() for r in self.manifest}
+                               if self.manifest and "sample_type" in self.manifest[0] else {})
+        self.slide_rows = L.load_slide_manifest(data_dir) or []
+        self.slide_kind_col = L.slide_kind_column(self.slide_rows)
 
     def population(self, code="01"):
         return self.by_code.get(code, [])
+
+    def sample_type_ids(self, code):
+        """Samples of one type (barcode code 01, 11 or 06) and where that came from."""
+        name = L.SAMPLE_TYPE_NAMES.get(code, code)
+        if self.sample_type_of:
+            ids = sorted(s for s, t in self.sample_type_of.items() if t.lower() == name.lower())
+            return ids, "sample_manifest.csv (sample_type)"
+        return list(self.by_code.get(code, [])), "barcode sample type code"
 
     # survival events (OS) keyed by sample id
     def _load_os(self):
@@ -311,7 +323,7 @@ def is_checkable(sentence):
         return False, "a recommendation, not a factual claim"
     s = sentence
     mentions = (find_layers(s) or find_attr_mentions(s) or parse_filters(s)
-                or re.search(r"\b(?:primary )?tumou?rs?\b|\bsamples?\b|\bpatients?\b|\bcases?\b", s, re.I))
+                or re.search(r"\b(?:primary )?tumou?rs?\b|\bsamples?\b|\bpatients?\b|\bcases?\b|\bsections?\b|\bmetasta\w*", s, re.I))
     if CLINICAL_WORDS.search(s) and mentions:
         return True, ""
     if mentions and QUANT_WORDS.search(s):
@@ -455,6 +467,63 @@ def parse_filters(text):
 
 NUM = r"(\d[\d,]*(?:\.\d+)?)"
 NOUNS = r"(samples?|patients?|tumou?rs?|cases?|deaths?|events?)"
+COUNT_WORDS = OrderedDict([("fewer than", "<"), ("less than", "<"), ("under", "<"), ("below", "<"), ("more than", ">"),
+                           ("over", ">"), ("above", ">"), ("at least", ">="), ("at most", "<="), ("up to", "<="), ("exactly", "==")])
+HEDGE_WORDS = r"about|around|approximately|roughly|nearly|almost|some"
+
+# Sample types, by barcode code: words that name them in a claim, and the label shown.
+SAMPLE_TYPE_WORDS = [("06", r"\bmetasta\w*"),
+                     ("11", r"\bnormal[- ]tissues?\b|\bsolid tissue normal\b|\b(?:adjacent )?normal (?:samples?|tissue)\b|\bnormals\b"),
+                     ("01", r"\bprimary\b")]
+SAMPLE_TYPE_LABEL = {"01": "primary tumor samples", "11": "normal tissue samples", "06": "metastasis samples"}
+
+
+def sample_type_code(low):
+    """'06' (metastasis), '11' (normal tissue) or '01' (primary) when the claim names a sample type, else None."""
+    for code, pat in SAMPLE_TYPE_WORDS:
+        if re.search(pat, low):
+            return code
+    return None
+
+
+def count_quantifier(low, start, n, noun):
+    """Read the words just before a count ('at least', 'about', nothing) into a count quantifier."""
+    before = low[max(0, start - 25):start]
+    m = re.search(r"\b(" + "|".join(COUNT_WORDS) + r")\s*$", before)
+    if m:
+        return {"kind": "count", "comparator": COUNT_WORDS[m.group(1)], "threshold": n, "noun": noun,
+                "reading": f"'{m.group(1)} {int(n)}' {noun}"}
+    hedge = re.search(r"\b(" + HEDGE_WORDS + r")\s*$", before)
+    return {"kind": "count", "comparator": "~c" if hedge else "==", "threshold": n, "noun": noun,
+            "reading": ("'about " if hedge else "'exactly ") + f"{int(n)}' {noun}" + (" (within 2 percent)" if hedge else "")}
+
+
+SLIDE_COUNT = re.compile(r"(?<![\w.,])(\d[\d,]*)(?!\s*(?:%|percent))\s+((?:[\w(),-]+\s+){0,3}?)(slides?|sections?)\b")
+SLIDE_KINDS = [("frozen, top section", r"\btop\b"), ("frozen, middle section", r"\bmiddle\b"), ("frozen, bottom section", r"\bbottom\b")]
+
+
+def parse_slide_count(text):
+    """'There are 1,133 diagnostic slides' -> the count, the slide kind (None means every slide) and a quantifier."""
+    low = text.lower().replace("’", "'")
+    m = SLIDE_COUNT.search(low)
+    if not m or re.search(r"\b(?:samples?|patients?|tumou?rs?|cases?|have|has|had|with)\b", m.group(2)):
+        return None  # "1,098 samples have slides" counts samples, not slides
+    if re.search(r"%|percent", low):
+        return None
+    words = m.group(2) + " " + m.group(3)
+    kind = None
+    if re.search(r"\bdiagnostic\b|\bffpe\b|\bdx\b", low):
+        kind = "diagnostic"
+    else:
+        for exact, pat in SLIDE_KINDS:
+            if re.search(pat, words):
+                kind = exact
+                break
+        if kind is None and (re.search(r"\bfrozen\b", low) or m.group(3).startswith("section")):
+            kind = "frozen"
+    n = float(m.group(1).replace(",", ""))
+    noun = "slides" if m.group(3).startswith("slide") else "sections"
+    return {"slide_kind": kind, "quantifier": count_quantifier(low, m.start(1), n, noun)}
 
 
 def parse_quantifier(text):
@@ -507,6 +576,9 @@ def parse_claim(text):
     q = parse_quantifier(text)
     if q and q["kind"] == "invalid":
         return {"type": "invalid", "reading": q["reading"]}
+    sc = parse_slide_count(text)
+    if sc:
+        return {"type": "slidecount", "slide_kind": sc["slide_kind"], "quantifier": sc["quantifier"]}
     target_text, cond_text = text, ""
     m = re.search(r"\b(?:samples|tumou?rs|patients|cases)\s+(?:that\s+|which\s+)?(?:have|with|having)\s+(.+)$", text, re.I)
     if m:
@@ -520,15 +592,14 @@ def parse_claim(text):
     recorded = [a for a in find_attr_mentions(target_text) if a not in filter_attrs]
     c_attrs = [a for a in find_attr_mentions(cond_text) if a not in filter_attrs and a not in recorded]
     events = bool(re.search(r"\b(deaths?|died|deceased|events?)\b", low))
-    code, pop_label = "01", "primary tumor samples"
-    for word, c, label in POPULATION_WORDS:
-        if word in low:
-            code, pop_label = c, label
+    tcode = sample_type_code(low)
+    code = tcode if tcode in ("11", "06") else "01"
+    pop_label = SAMPLE_TYPE_LABEL[code]
     comparison = bool(re.search(r"compar|large enough|enough|sufficient|adequate", low))
     analytic = re.search(r"\b(correlat\w*|associat\w*|predict\w*|caus\w*|relationship|risk factors?|impact\w*|effects?|differ\w*|linked to)\b", low)
     base = {"filters": filters, "conditions": c_layers, "cond_attrs": c_attrs, "quantifier": q,
             "pop_code": code, "pop_label": pop_label, "events": events,
-            "explicit_pop": bool(re.search(r"\bprimary\b|normal tissue|metasta", low))}
+            "explicit_pop": tcode is not None}
     ext = re.search(r"\b(?:is|are)\s+the\s+(largest|biggest|most common|most frequent|smallest|rarest|least common)\b", low)
     if ext and filters:
         direction = "min" if ext.group(1) in ("smallest", "rarest", "least common") else "max"
@@ -542,10 +613,24 @@ def parse_claim(text):
                 "reason": "it asserts a relationship, effect or prediction, which this tool does not test, or it uses a field that is not loaded"}
     if recorded and not t_layers and not filters and comparison and q is None:
         return dict(base, type="readiness", attr=recorded[0])
+    typed = tcode in ("11", "06")  # metastasis or normal tissue samples
+    if typed and q is None and not t_layers and not recorded and not filters and not events:
+        m = re.search(r"(?<![\w.,])(\d[\d,]*)(?!\s*(?:%|percent))", low)
+        if m:  # "There are 7 metastases": the number names no noun
+            q = count_quantifier(low, m.start(1), float(m.group(1).replace(",", "")), "samples")
+            base["quantifier"] = q
+    popverb = re.search(r"\b(there (?:are|were)|has|have|had|holds?|contains?|includes?|comprises?|totals?|consists? of|release|cohort|dataset)\b", low)
     if (q and q["kind"] == "count" and not t_layers and not recorded and not filters and not events
-            and re.search(r"\b(?:primary tumou?rs?|tumou?rs?|samples?|patients?|cases?)\b", low)
-            and re.search(r"\b(there (?:are|were)|has|have|had|contains?|includes?|comprises?|totals?|consists? of|release|cohort|dataset)\b", low)):
-        pop = "patients" if re.search(r"\bpatients?\b", low) else ("samples" if re.search(r"\bsamples?\b", low) else "primary")
+            and (typed or re.search(r"\b(?:primary tumou?rs?|tumou?rs?|samples?|patients?|cases?)\b", low))
+            and (popverb or (typed and re.search(r"\b(?:are|were|is|was|exist|number)\b", low)))):
+        if typed:
+            pop = "type:" + tcode
+        elif re.search(r"\bpatients?\b", low):
+            pop = "patients"
+        elif tcode == "01":
+            pop = "primary"  # "1,101 primary tumor samples" counts primary tumors, not every sample
+        else:
+            pop = "samples" if re.search(r"\bsamples?\b", low) else "primary"
         return dict(base, type="popsize", pop=pop)
     if t_layers or recorded or (events and not filters) or (events and filters):
         return dict(base, type="measure", mode="targets", targets=t_layers, recorded=recorded)
@@ -817,6 +902,8 @@ def evaluate_claim(ctx, fid, text):
         return readiness_finding(ctx, f, parsed, total)
     if parsed["type"] == "popsize":
         return popsize_finding(ctx, f, parsed, total)
+    if parsed["type"] == "slidecount":
+        return slidecount_finding(ctx, f, parsed)
     if parsed["type"] == "extremum":
         return extremum_finding(ctx, f, parsed, total)
 
@@ -950,8 +1037,79 @@ def evaluate_claim(ctx, fid, text):
     return f
 
 
+def sampletype_finding(ctx, f, parsed, code):
+    """'There are 7 metastatic samples': count one sample type from the manifest's sample_type column."""
+    ids, src = ctx.sample_type_ids(code)
+    name, label = L.SAMPLE_TYPE_NAMES[code], SAMPLE_TYPE_LABEL[code]
+    n, total, q = len(ids), len(ctx.all_samples), parsed["quantifier"]
+    ok = satisfied(q, None, n)
+    by_code = len(ctx.by_code.get(code, []))
+    slug = re.sub(r"\W+", "_", name.lower()).strip("_")
+    calc = (f"samples in the release: {total}. Samples with sample_type '{name}' in {src}: {n}"
+            + (f" (barcode type code {code} gives {by_code})" if src.startswith("sample_manifest") else "")
+            + f". Claim read as: {q['reading']}.")
+    f["evidence"].update({"metric_name": f"count_sample_type_{slug}", "value": n, "n_samples": n, "denominator": total,
+                          "source_files": ["sample_manifest.csv (sample_type)"], "calculation": calc})
+    f["cohort_trace"] = [{"step": "samples in the release", "n_before": total, "n_after": total},
+                         {"step": f"sample_type is {name}", "n_before": total, "n_after": n}]
+    f["verdict"] = "supported" if ok else "contradicted"
+    f["limitation"] = ("Counts come from the release's sample list: one sample is one barcode, and one patient can have several samples. "
+                       "The sample type is as recorded in the manifest; it was not checked against the tissue itself.")
+    if ok:
+        f["next_actions"] = ["Say which release the count describes, so readers can reproduce it."]
+    else:
+        f["correct_value"] = {"value": n, "unit": "samples", "text": f"{n} {label} ({n} of {total} samples in the release)"}
+        f["next_actions"] = [f"Restate the count as {n} {label}."]
+    return f
+
+
+def slide_matches(kind, value):
+    if kind is None:
+        return True
+    if kind in ("diagnostic", "frozen"):
+        return L.slide_kind_group(value) == kind
+    return (value or "").strip().lower() == kind
+
+
+def slidecount_finding(ctx, f, parsed):
+    """'There are 1,133 diagnostic slides': count rows of slide_manifest.csv, split by its slide kind column."""
+    rows, col, q, kind = ctx.slide_rows, ctx.slide_kind_col, parsed["quantifier"], parsed["slide_kind"]
+    if not rows or (kind and not col):
+        f["evidence"]["calculation"] = "not run: slide_manifest.csv was not found, or it has no slide kind column"
+        f["limitation"] = "The data cannot answer this: there is no slide list (slide_manifest.csv) in the data folder."
+        f["guardrail_flags"] = ["data_cannot_answer"]
+        f["next_actions"] = ["Add slide_manifest.csv to the data folder, then re-run."]
+        return f
+    total = len(rows)
+    n = sum(1 for r in rows if slide_matches(kind, r.get(col) if col else None))
+    kinds = Counter((r.get(col) or "").strip() for r in rows) if col else Counter()
+    kind_txt = "; ".join(f"{k or 'blank'} {v}" for k, v in kinds.most_common())
+    what = {None: "slides", "diagnostic": "diagnostic (FFPE) slides", "frozen": "frozen sections"}.get(kind, f"{kind} slides")
+    rule = {None: "every row", "diagnostic": f"{col} says diagnostic or FFPE", "frozen": f"{col} says frozen"}.get(kind, f"{col} is '{kind}'")
+    ok = satisfied(q, None, n)
+    slug = re.sub(r"\W+", "_", (kind or "all")).strip("_")
+    calc = (f"slides listed in slide_manifest.csv: {total}" + (f" (by {col}: {kind_txt})" if col else "")
+            + f". {what[0].upper() + what[1:]} ({rule}): {n}. Claim read as: {q['reading']}.")
+    f["evidence"].update({"metric_name": f"count_slides_{slug}", "value": n, "n_samples": n, "denominator": total,
+                          "source_files": ["slide_manifest.csv" + (f" ({col})" if col else "")], "calculation": calc})
+    f["cohort_trace"] = [{"step": "slides in slide_manifest.csv", "n_before": total, "n_after": total}]
+    if kind:
+        f["cohort_trace"].append({"step": what, "n_before": total, "n_after": n})
+    f["verdict"] = "supported" if ok else "contradicted"
+    f["limitation"] = ("Counts come from slide_manifest.csv, one row per slide image listed in NCI Imaging Data Commons; "
+                       "a sample can have several slides, and the slides themselves were not opened or checked.")
+    if ok:
+        f["next_actions"] = ["Say whether the count means diagnostic slides, frozen sections, or both."]
+    else:
+        f["correct_value"] = {"value": n, "unit": "slides", "text": f"{n} {what} ({n} of {total} slides in slide_manifest.csv)"}
+        f["next_actions"] = [f"Restate the count as {n} {what}."]
+    return f
+
+
 def popsize_finding(ctx, f, parsed, total):
     key = parsed["pop"]
+    if key.startswith("type:"):
+        return sampletype_finding(ctx, f, parsed, key[5:])
     if key == "samples":
         n, label = len(ctx.all_samples), "samples in the release"
     elif key == "patients":
