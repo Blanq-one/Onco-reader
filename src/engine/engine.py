@@ -1,4 +1,4 @@
-r"""Evidence engine v1.2.0: turn report claims into checked findings (standard library only).
+r"""Evidence engine v1.2.1: turn report claims into checked findings (standard library only).
 
 Plain English: for each claim in a report it (1) runs the guardrail pre-check,
 (2) reads the claim as a small template, (3) computes the real numbers from the
@@ -723,7 +723,7 @@ def run_guardrails(text):
         flags.append("invalid_input")
     if re.search(r"ignore (all )?previous instructions|reveal your api key|^system:", low):
         flags.append("prompt_injection_suspected")
-    if re.search(r"\bdob\b|\bmrn\b|[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}", low):
+    if re.search(r"\bdob\b|\bmrn\b|[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}|(?<!\d)(?:\+?1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}(?!\d)", low):
         flags.append("phi_like_input")
     if re.search(r"outside records|obituar", low):
         flags.append("reidentification_blocked")
@@ -1082,7 +1082,11 @@ def combine_parts(parts, text):
 
 
 def finalize_finding(f, source):
-    f["source_sentence"] = f["claim_text"] if REDACT_FLAGS & set(f["guardrail_flags"]) else source
+    # The stored source sentence can be longer than the checked claim (for example a trimmed tail),
+    # so run the guardrails on the full sentence too and redact it the same way when flagged.
+    guard = run_guardrails(source)
+    flags = set(f["guardrail_flags"]) | (set() if guard.get("allowed", True) else set(guard.get("flags", [])))
+    f["source_sentence"] = safe_claim_text(source, sorted(flags)) if REDACT_FLAGS & flags else source
     if f["verdict"] == "insufficient_evidence" and not f.get("missing_evidence"):
         flags = set(f["guardrail_flags"])
         if "clinical_claim_blocked" in flags:
@@ -1145,7 +1149,7 @@ def _build_document(ctx, findings, title):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Evidence engine v1.2.0")
+    ap = argparse.ArgumentParser(description="Evidence engine v1.2.1")
     ap.add_argument("--data-dir", default=L.DEFAULT_DIR)
     ap.add_argument("--report", help="text or markdown file with numbered or bulleted claims")
     ap.add_argument("--claim", action="append", default=[], help="a single claim (can repeat)")

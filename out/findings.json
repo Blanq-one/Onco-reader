@@ -10,7 +10,8 @@
   "interpretation_config": {
     "most_threshold": 0.5,
     "nearly_all": 0.95,
-    "about_tolerance": 0.05,
+    "about_tolerance": 0.03,
+    "about_count_rel": 0.02,
     "borderline_margin": 0.02,
     "min_population": 30,
     "min_events": 20,
@@ -143,7 +144,10 @@
         "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
         "alt_value": 0.9471,
         "verdict_changes": false
-      }
+      },
+      "correct_value": null,
+      "missing_evidence": null,
+      "source_sentence": "ER status is recorded for most samples."
     },
     {
       "id": "claim-002",
@@ -188,7 +192,10 @@
         "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
         "alt_value": 912,
         "verdict_changes": false
-      }
+      },
+      "correct_value": null,
+      "missing_evidence": null,
+      "source_sentence": "At least 500 ER-positive tumors are available."
     },
     {
       "id": "claim-003",
@@ -234,7 +241,10 @@
         "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
         "alt_value": 0.9956,
         "verdict_changes": false
-      }
+      },
+      "correct_value": null,
+      "missing_evidence": null,
+      "source_sentence": "Survival data is available for most ER-positive tumors."
     },
     {
       "id": "claim-004",
@@ -281,7 +291,14 @@
         "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
         "alt_value": 0.5844,
         "verdict_changes": false
-      }
+      },
+      "correct_value": {
+        "value": 65.5,
+        "unit": "percent",
+        "text": "65.5% (529 of 808)"
+      },
+      "missing_evidence": null,
+      "source_sentence": "Protein data covers nearly all ER-positive tumors."
     },
     {
       "id": "claim-005",
@@ -332,7 +349,10 @@
         "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
         "alt_value": 135,
         "verdict_changes": false
-      }
+      },
+      "correct_value": null,
+      "missing_evidence": null,
+      "source_sentence": "At least 100 deaths among ER-positive tumors."
     },
     {
       "id": "claim-006",
@@ -375,7 +395,10 @@
         "State a number the claim should meet (for example, at least 75 percent), then re-run.",
         "Ask a reviewer what counts as enough for the intended question."
       ],
-      "robustness": null
+      "robustness": null,
+      "correct_value": null,
+      "missing_evidence": "The claim has no measurable threshold; a person must decide what counts as enough.",
+      "source_sentence": "Mutation and survival data overlap enough to study survival by mutation status."
     },
     {
       "id": "claim-007",
@@ -442,7 +465,10 @@
         "Merge or drop the smallest group (Normal-like, 23 samples) if the comparison needs balanced groups.",
         "Check why 257 of 1101 samples have no recorded PAM50 subtype."
       ],
-      "robustness": null
+      "robustness": null,
+      "correct_value": null,
+      "missing_evidence": "The claim has no measurable threshold; a person must decide what counts as large enough. The smallest group has only 23 samples. 3 group(s) have fewer than 20 deaths, which is thin for survival comparisons.",
+      "source_sentence": "The cohort is large enough for a subtype comparison."
     },
     {
       "id": "claim-008",
@@ -483,7 +509,14 @@
         "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
         "alt_value": 0.9968,
         "verdict_changes": false
-      }
+      },
+      "correct_value": {
+        "value": 99.7,
+        "unit": "percent",
+        "text": "99.7% (1098 of 1101)"
+      },
+      "missing_evidence": null,
+      "source_sentence": "Every tumor sample has a matching pathology slide."
     },
     {
       "id": "claim-009",
@@ -508,7 +541,10 @@
         "Rewrite the claim as a data-availability question, such as how many samples have treatment records.",
         "Send treatment-effect questions to qualified clinical researchers."
       ],
-      "robustness": null
+      "robustness": null,
+      "correct_value": null,
+      "missing_evidence": "Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, survival times, and molecular layers, but no treatment or response data.",
+      "source_sentence": "Drug X improves survival for patients in this dataset."
     },
     {
       "id": "claim-010",
@@ -532,7 +568,10 @@
       "next_actions": [
         "Rewrite the claim as a cohort-level question."
       ],
-      "robustness": null
+      "robustness": null,
+      "correct_value": null,
+      "missing_evidence": "Not applicable: this tool answers cohort-level data-readiness questions only.",
+      "source_sentence": "Samples from patient [REDACTED] show unusual survival."
     },
     {
       "id": "claim-011",
@@ -557,7 +596,10 @@
         "Rephrase the claim around the available layers (clinical, survival, mutation, copy number, RNA, protein, slides) or clinical fields (ER, PR, HER2, stage, histology, PAM50 subtype, gender).",
         "Check whether the needed field exists in another data file."
       ],
-      "robustness": null
+      "robustness": null,
+      "correct_value": null,
+      "missing_evidence": "it needs a field that is not among the loaded layers or clinical attributes. A data field that covers this question would be needed.",
+      "source_sentence": "Smoking history is recorded for most patients."
     }
   ]
 }
