@@ -1,5 +1,5 @@
-import { h, sv, pct, fmtNum, toast } from './util.js';
-import { VERDICT, FLAG_TEXT, isBlocked, cannotAnswer, hasNumber, decisions, decide, reviewStatus, reviewJson, state, dataUrl, minGroup, minEvents } from './state.js';
+import { h, sv, pct, fmtNum, plural, toast } from './util.js';
+import { VERDICT, FLAG_TEXT, isBlocked, cannotAnswer, hasNumber, decisions, decide, decisionAllowed, BLOCKED_OVERRIDE_ERROR, reviewStatus, reviewJson, state, dataUrl, minGroup, minEvents } from './state.js';
 
 export function verdictBadge(f) {
   if (isBlocked(f)) return h('span', { class: 'badge v-blocked' }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '⛔'), 'Blocked');
@@ -16,6 +16,15 @@ export function headlineText(f) {
   if (!hasNumber(f)) return null;
   const e = f.evidence;
   return fmtNum(e.n_samples) + ' of ' + fmtNum(e.denominator);
+}
+// On a phone a table with class "stack" shows one block per row, each cell labeled with its column header (app.css).
+export function stackTable(table) {
+  const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+  table.classList.add('stack');
+  table.querySelectorAll('tbody tr').forEach((tr) => [...tr.children].forEach((c, i) => {
+    if (c.tagName === 'TD' && heads[i]) c.setAttribute('data-label', heads[i]);
+  }));
+  return table;
 }
 export function breadcrumbs(items) {
   return h('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, h('ol', {}, items.map((it, i) =>
@@ -43,48 +52,62 @@ export function breakdownChart(rows) {
     h('div', { class: 'bk', role: 'list', 'aria-label': 'Group sizes' }, rows.map((r) => {
       const lowN = r.n < mg, lowE = r.events != null && r.events < me;
       const notes = [];
-      if (lowN) notes.push('under ' + mg + ' samples');
-      if (lowE) notes.push('under ' + me + ' deaths');
+      if (lowN) notes.push('under ' + plural(mg, 'sample'));
+      if (lowE) notes.push('under ' + plural(me, 'death'));
       return h('div', { class: 'bk-row', role: 'listitem' },
         h('div', {}, h('b', {}, r.group), notes.length ? h('div', { class: 'bk-note chip warn' }, '⚠ ' + notes.join(', ')) : null),
         sv('svg', { viewBox: '0 0 100 22', preserveAspectRatio: 'none', 'aria-hidden': 'true' },
           sv('rect', { class: 'bk-bar' + (lowN || lowE ? ' low' : ''), x: 0, y: 3, width: Math.max(0.5, 100 * r.n / max), height: 16, rx: 2 }),
           sv('line', { class: 'bk-line', x1: 100 * mg / max, x2: 100 * mg / max, y1: 0, y2: 22, 'vector-effect': 'non-scaling-stroke' })),
-        h('div', { class: 'f-num' }, fmtNum(r.n) + ' samples', r.events != null ? h('small', { style: 'color:var(--muted)' }, fmtNum(r.events) + ' deaths') : null));
+        h('div', { class: 'f-num' }, plural(r.n, 'sample'), r.events != null ? h('small', { style: 'color:var(--muted)' }, plural(r.events, 'death')) : null));
     })),
-    h('p', { class: 'muted bk-note' }, 'Dashed line: minimum group size (' + mg + ' samples). Marker: group under ' + mg + ' samples or ' + me + ' deaths.'));
+    h('p', { class: 'muted bk-note' }, 'Dashed line: minimum group size (' + plural(mg, 'sample') + '). Marker: group under ' + plural(mg, 'sample') + ' or ' + plural(me, 'death') + '.'));
 }
 
 // Accept or override the machine verdict. Both verdicts are kept (see reviewJson in state.js).
 const vLabel = (v) => (VERDICT[v] || { label: String(v) }).label;
 export function reviewBlock(f, onChange) {
+  const blocked = isBlocked(f);
   const cur = decisions()[f.id] || {};
   const status = h('p', { class: 'dec-saved', role: 'status' });
   const activeKey = (st) => (st === 'accepted' ? 'approve' : st === 'overridden' ? 'reject' : st === 'more_evidence_requested' ? 'more' : '');
-  const show = () => {
+  const show = (refused) => {
     const st = reviewStatus(f), c = decisions()[f.id] || {};
-    status.textContent = st === 'pending' ? 'Not reviewed yet.'
+    status.classList.toggle('dec-refused', !!refused || !decisionAllowed(f, c));
+    status.textContent = refused ? 'Not saved: ' + BLOCKED_OVERRIDE_ERROR + '.'
+      : !decisionAllowed(f, c) ? 'A saved override is not allowed for a blocked claim. Choose Accept or Ask for more evidence.'
+      : st === 'pending' ? 'Not reviewed yet.'
       : st === 'overridden' ? 'Overridden. Original: ' + vLabel(f.verdict) + '. Reviewer: ' + vLabel(c.verdict) + '.'
-      : st === 'accepted' ? 'Accepted: ' + vLabel(f.verdict) + '.' : 'More evidence requested.';
+      : st === 'accepted' ? 'Accepted: ' + (blocked ? 'blocked, recorded as insufficient evidence' : vLabel(f.verdict)) + '.' : 'More evidence requested.';
     group.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === activeKey(st))));
   };
   const note = h('textarea', { id: 'note-' + f.id, placeholder: 'Optional note' });
   note.value = cur.note || '';
   note.addEventListener('change', () => { if (decisions()[f.id]) { decide(f.id, { note: note.value }); show(); onChange && onChange(); } });
+  const save = (k, verdict) => { const ok = decide(f.id, { decision: k, verdict, note: note.value }); show(!ok); if (ok && onChange) onChange(k); };
+  const btn = (k, label, fn) => h('button', { class: 'btn', type: 'button', 'data-k': k, 'aria-pressed': 'false', onclick: fn }, label);
+  const noteParts = [h('label', { for: 'note-' + f.id, class: 'muted', style: 'font-size:.85rem;display:block;margin-top:8px' }, 'Note (optional)'), note, status];
+  const original = h('p', { class: 'row' }, h('span', { class: 'muted' }, 'Original verdict:'), verdictBadge(f));
+  let group;
+  if (blocked) {
+    // No override control at all: there is no result to change.
+    group = h('div', { class: 'decision', role: 'group', 'aria-label': 'Review decision', 'aria-describedby': 'why-' + f.id },
+      btn('approve', 'Accept as insufficient evidence', () => save('approve', 'insufficient_evidence')),
+      btn('more', 'Ask for more evidence', () => save('more', null)));
+    show();
+    return h('div', {}, original,
+      h('p', { class: 'notice block', id: 'why-' + f.id }, 'A guardrail stopped this claim before any analysis, so there is no result to override. You can accept it as insufficient evidence or ask for more evidence.'),
+      group, ...noteParts);
+  }
   const others = Object.keys(VERDICT).filter((v) => v !== f.verdict);
   const pick = h('select', { id: 'rv-' + f.id }, others.map((v) => h('option', Object.assign({ value: v }, cur.verdict === v ? { selected: true } : {}), VERDICT[v].label)));
-  const save = (k, verdict) => { decide(f.id, { decision: k, verdict, note: note.value }); show(); onChange && onChange(k); };
-  const btn = (k, label, fn) => h('button', { class: 'btn', type: 'button', 'data-k': k, 'aria-pressed': 'false', onclick: fn }, label);
-  const group = h('div', { class: 'decision', role: 'group', 'aria-label': 'Review decision' },
+  group = h('div', { class: 'decision', role: 'group', 'aria-label': 'Review decision' },
     btn('approve', 'Accept ' + vLabel(f.verdict), () => save('approve', f.verdict)),
     btn('reject', 'Override with the verdict below', () => save('reject', pick.value)),
     btn('more', 'Ask for more evidence', () => save('more', null)));
   show();
-  return h('div', {},
-    h('p', { class: 'row' }, h('span', { class: 'muted' }, 'Original verdict:'), verdictBadge(f)),
-    group,
-    h('label', { for: 'rv-' + f.id, class: 'muted', style: 'font-size:.85rem;display:block' }, 'Override with this verdict'), pick,
-    h('label', { for: 'note-' + f.id, class: 'muted', style: 'font-size:.85rem;display:block;margin-top:8px' }, 'Note (optional)'), note, status);
+  return h('div', {}, original, group,
+    h('label', { for: 'rv-' + f.id, class: 'muted', style: 'font-size:.85rem;display:block' }, 'Override with this verdict'), pick, ...noteParts);
 }
 export function reviewChip(f) {
   const st = reviewStatus(f);
@@ -102,7 +125,7 @@ export function claimFacts(f) {
   if (f.correct_value && (f.correct_value.text || f.correct_value.value != null)) out.push(h('section', { class: 'card fact bad', 'aria-label': 'Correct value' }, h('h2', {}, 'Correct value from the data'),
     h('p', { class: 'fact-v' }, f.correct_value.text || (f.correct_value.value + ' ' + (f.correct_value.unit || '')))));
   if (f.missing_evidence) out.push(h('section', { class: 'card fact warn', 'aria-label': 'Missing evidence' }, h('h2', {}, 'Data that would be needed'), h('p', { style: 'margin:0' }, f.missing_evidence)));
-  if (subs.length) out.push(h('section', { class: 'card', 'aria-label': 'Parts of this sentence' }, h('h2', {}, 'This sentence has ' + subs.length + ' parts'),
+  if (subs.length) out.push(h('section', { class: 'card', 'aria-label': 'Parts of this sentence' }, h('h2', {}, 'This sentence has ' + plural(subs.length, 'part')),
     h('ul', { class: 'subs' }, subs.map((s) => h('li', {}, verdictBadge({ verdict: s.verdict, guardrail_flags: [] }), h('span', {}, ' ' + s.claim),
       s.value != null ? h('small', { class: 'muted' }, ' (' + fmtNum(s.n_samples) + ' of ' + fmtNum(s.denominator) + ')') : null)))));
   return out;
@@ -130,7 +153,11 @@ export function exportButtons() {
     } catch (e) { toast('audit.json is not available right now.'); }
     b.disabled = false;
   } }, 'Download audit.json');
-  const review = h('button', { class: 'btn', type: 'button', onclick: () => { saveBlob(JSON.stringify(reviewJson(), null, 2) + '\n', 'review.json'); toast('review.json downloaded'); } }, 'Download review.json');
+  const review = h('button', { class: 'btn', type: 'button', onclick: () => {
+    let doc;
+    try { doc = reviewJson(); } catch (e) { toast('review.json not saved. ' + e.message + '.'); return; }
+    saveBlob(JSON.stringify(doc, null, 2) + '\n', 'review.json'); toast('review.json downloaded');
+  } }, 'Download review.json');
   return h('div', { class: 'row no-print' }, audit, review);
 }
 export { pct };
@@ -144,11 +171,11 @@ export function caption(f) {
   const ds = t.find((s) => s.n_after === e.denominator);
   if (Array.isArray(e.breakdown) && e.breakdown.length) {
     const small = e.breakdown.reduce((a, b) => (b.n < a.n ? b : a));
-    return 'The number to watch is ' + fmtNum(small.n) + ' samples, the size of the smallest group (' + small.group + '). '
-      + n + ' of ' + d + ' samples' + (ns ? ' remain after "' + ns.step + '"' : ' were counted') + ' and are split into ' + e.breakdown.length + ' groups.';
+    return 'The number to watch is ' + plural(small.n, 'sample') + ', the size of the smallest group (' + small.group + '). '
+      + n + ' of ' + plural(e.denominator, 'sample') + (ns ? (e.n_samples === 1 ? ' remains' : ' remain') + ' after "' + ns.step + '"' : (e.n_samples === 1 ? ' was counted' : ' were counted')) + ' and are split into ' + plural(e.breakdown.length, 'group') + '.';
   }
-  if (!ns || !ds) return n + ' samples were counted out of ' + d + ' in the calculation (see the calculation panel).';
-  if (e.n_samples === e.denominator) return 'All ' + d + ' samples at "' + ds.step + '" also pass "' + ns.step + '".';
-  if (ns === ds) return n + ' of ' + d + ' samples are at the step "' + ns.step + '".';
-  return 'Of ' + d + ' samples at "' + ds.step + '", ' + n + ' remain after "' + ns.step + '".';
+  if (!ns || !ds) return plural(e.n_samples, 'sample was', 'samples were') + ' counted out of ' + d + ' in the calculation (see the calculation panel).';
+  if (e.n_samples === e.denominator) return (e.denominator === 1 ? 'The 1 sample' : 'All ' + d + ' samples') + ' at "' + ds.step + '" also ' + (e.denominator === 1 ? 'passes' : 'pass') + ' "' + ns.step + '".';
+  if (ns === ds) return n + ' of ' + plural(e.denominator, 'sample') + (e.n_samples === 1 ? ' is' : ' are') + ' at the step "' + ns.step + '".';
+  return 'Of ' + plural(e.denominator, 'sample') + ' at "' + ds.step + '", ' + n + (e.n_samples === 1 ? ' remains' : ' remain') + ' after "' + ns.step + '".';
 }

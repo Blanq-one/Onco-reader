@@ -1,7 +1,7 @@
 import { h } from '../util.js';
 import { state, findings, saveFilters, FLAG_TEXT, isBlocked, hasNumber } from '../state.js';
 import { verdictBadge, flagChips, headlineText, factLine } from '../ui.js';
-import { pct } from '../util.js';
+import { pct, plural } from '../util.js';
 
 let active = -1;
 let shown = [];
@@ -64,7 +64,7 @@ export function resultsPage() {
   }
   function draw() {
     shown = apply(); active = Math.min(active, shown.length - 1);
-    count.textContent = shown.length + ' of ' + all.length + ' claims shown';
+    count.textContent = shown.length + ' of ' + plural(all.length, 'claim') + ' shown';
     if (!shown.length) {
       list.replaceChildren(h('li', { class: 'empty' }, h('h2', {}, 'No claims match'), h('p', { class: 'muted' }, 'Change or clear the filters.'),
         h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(f, { q: '', verdict: '', review: false, flag: '', sort: 'order' }); saveFilters(); window.dispatchEvent(new Event('hashchange')); } }, 'Clear filters')));

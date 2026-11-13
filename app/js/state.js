@@ -72,25 +72,43 @@ export const minGroup = () => (state.data.interpretation_config || {}).min_group
 export const minEvents = () => (state.data.interpretation_config || {}).min_events ?? 20;
 
 export const decisions = () => store('en.decisions') || {};
+// A claim stopped by a guardrail has no result to override. A reviewer may only accept it as
+// insufficient evidence or ask for more evidence. Same rule and same message as build_review in
+// src/export/audit_json.py (BLOCKED_OVERRIDE_ERROR).
+export const BLOCKED_OVERRIDE_ERROR = 'a blocked claim cannot be overridden; accept it as insufficient evidence or ask for more evidence';
+export function decisionAllowed(f, d) {
+  if (!f || !d || !isBlocked(f)) return true;
+  if (d.decision === 'reject') return false;
+  return d.verdict == null || d.verdict === 'insufficient_evidence';
+}
+// Returns false, and saves nothing, when the decision is not allowed for this claim.
 export function decide(id, patch) {
   const all = decisions();
-  all[id] = Object.assign({}, all[id], patch, { at: new Date().toISOString() });
+  const next = Object.assign({}, all[id], patch, { at: new Date().toISOString() });
+  if (!decisionAllowed(byId(id), next)) return false;
+  all[id] = next;
   store('en.decisions', all);
+  return true;
 }
 export const DECISION_TEXT = { approve: 'Accepted', reject: 'Overridden', more: 'More evidence requested' };
 // pending | accepted | overridden | more_evidence_requested (same rule as the exporter's build_review)
 export function reviewStatus(f) {
   const d = decisions()[f.id] || {};
   if (d.decision === 'more') return 'more_evidence_requested';
+  if (d.decision === 'approve' && isBlocked(f)) return 'accepted'; // accepted as insufficient evidence
   if (d.decision === 'reject' || (d.verdict && d.verdict !== f.verdict)) return 'overridden';
   if (d.decision === 'approve') return 'accepted';
   return 'pending';
 }
+// Throws Error(id + ': ' + BLOCKED_OVERRIDE_ERROR) if a saved decision overrides a blocked claim.
 export function reviewJson() {
   const d = state.data, dec = decisions();
+  const bad = findings().find((f) => !decisionAllowed(f, dec[f.id]));
+  if (bad) throw new Error(bad.id + ': ' + BLOCKED_OVERRIDE_ERROR);
   const items = findings().map((f) => {
     const x = dec[f.id] || {}, st = reviewStatus(f);
-    const human = x.decision === 'more' ? null : (x.verdict || (x.decision === 'approve' ? f.verdict : null));
+    const accepted = x.decision === 'approve' ? (isBlocked(f) ? 'insufficient_evidence' : f.verdict) : null;
+    const human = x.decision === 'more' ? null : (x.verdict || accepted);
     return {
       finding_id: f.id, claim_text: String(f.source_sentence || f.claim_text || ''), machine_verdict: f.verdict,
       needs_human_review: !!f.needs_human_review, review_reason: f.review_reason || null, status: st,

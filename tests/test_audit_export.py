@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -336,6 +337,110 @@ class TestReview(unittest.TestCase):
                     {"claim-001": "approve"}, ["claim-001"]):
             with self.assertRaises(ValueError):
                 AJ.build_review(make_doc(), bad)
+
+
+class TestBlockedReview(unittest.TestCase):
+    """A blocked claim (claim-003, clinical_claim_blocked) may only be accepted or sent back for more evidence."""
+
+    BLOCKED_TEXT = "highest protein responded best to therapy"
+
+    def assertRefused(self, decision):
+        with self.assertRaises(ValueError) as cm:
+            AJ.build_review(make_doc(), {"claim-003": decision})
+        msg = str(cm.exception)
+        self.assertEqual(msg, "claim-003: " + AJ.BLOCKED_OVERRIDE_ERROR)
+        self.assertNotIn(self.BLOCKED_TEXT, msg)  # never echoes claim text or the note
+        self.assertNotIn("secret note", msg)
+
+    def test_override_of_a_blocked_claim_is_refused(self):
+        for verdict in ("supported", "contradicted", "insufficient_evidence", None):
+            with self.subTest(verdict=verdict):
+                self.assertRefused({"decision": "reject", "verdict": verdict, "note": "secret note"})
+
+    def test_any_other_verdict_on_a_blocked_claim_is_refused(self):
+        for d in ({"verdict": "supported"}, {"decision": "approve", "verdict": "supported"},
+                  {"decision": "approve", "verdict": "contradicted"}, {"decision": "more", "verdict": "supported"}):
+            with self.subTest(decision=d):
+                self.assertRefused(dict(d, note="secret note"))
+
+    def test_every_blocking_flag_is_guarded(self):
+        for flag in sorted(AJ.BLOCKING_FLAGS):
+            doc = make_doc()
+            doc["findings"][0]["guardrail_flags"] = [flag]  # claim-001 is "supported" in the engine document
+            with self.subTest(flag=flag), self.assertRaises(ValueError) as cm:
+                AJ.build_review(doc, {"claim-001": {"decision": "reject", "verdict": "contradicted"}})
+            self.assertIn(AJ.BLOCKED_OVERRIDE_ERROR, str(cm.exception))
+
+    def test_low_event_count_is_not_a_block(self):
+        doc = make_doc()
+        doc["findings"][0]["guardrail_flags"] = ["low_event_count", "data_cannot_answer"]
+        items = AJ.build_review(doc, {"claim-001": {"decision": "reject", "verdict": "contradicted"}})["items"]
+        self.assertEqual(items[0]["status"], "overridden")
+
+    def test_accept_records_insufficient_evidence(self):
+        for d in ({"decision": "approve"}, {"decision": "approve", "verdict": "insufficient_evidence"}):
+            with self.subTest(decision=d):
+                item = AJ.build_review(make_doc(), {"claim-003": d})["items"][2]
+                self.assertEqual((item["status"], item["human_decision"], item["human_verdict"], item["machine_verdict"]),
+                                 ("accepted", "approve", "insufficient_evidence", "insufficient_evidence"))
+
+    def test_accept_of_a_blocked_claim_never_counts_as_an_override(self):
+        doc = make_doc()
+        doc["findings"][0]["guardrail_flags"] = ["prompt_injection_suspected"]  # machine verdict "supported"
+        item = AJ.build_review(doc, {"claim-001": {"decision": "approve"}})["items"][0]
+        self.assertEqual((item["status"], item["human_verdict"]), ("accepted", "insufficient_evidence"))
+
+    def test_ask_for_more_evidence_is_allowed(self):
+        for d in ({"decision": "more"}, {"decision": "more", "verdict": "insufficient_evidence"}):
+            with self.subTest(decision=d):
+                review = AJ.build_review(make_doc(), {"claim-003": dict(d, note="needs records")})
+                item = review["items"][2]
+                self.assertEqual(item["status"], "more_evidence_requested")
+                self.assertEqual(item["note"], "needs records")
+                self.assertEqual(review["counts"]["overridden"], 0)
+
+    def test_pending_blocked_claim_is_allowed(self):
+        item = AJ.build_review(make_doc(), {"claim-003": {"note": "looked at it"}})["items"][2]
+        self.assertEqual((item["status"], item["human_verdict"]), ("pending", None))
+
+    def test_unblocked_claims_can_still_be_overridden(self):
+        items = AJ.build_review(make_doc(), {"claim-002": {"decision": "reject", "verdict": "supported"}})["items"]
+        self.assertEqual(items[1]["status"], "overridden")
+
+    def test_flag_set_matches_the_guardrails_and_the_app(self):
+        from src.guardrails import BLOCKING_FLAGS
+        self.assertEqual(AJ.BLOCKING_FLAGS, BLOCKING_FLAGS)
+        with open(os.path.join(ROOT, "app", "js", "state.js"), encoding="utf-8") as fh:
+            js = fh.read()
+        block = js[js.index("export const BLOCKED = ["):]
+        block = block[:block.index("];")]
+        self.assertEqual(set(re.findall(r"'([a-z_]+)'", block)), set(AJ.BLOCKING_FLAGS))
+        self.assertIn("'" + AJ.BLOCKED_OVERRIDE_ERROR + "'", js)  # the app shows the same fixed message
+
+    def test_make_audit_refuses_a_blocked_override_without_claim_text(self):
+        mod = load_make_audit()
+        with tempfile.TemporaryDirectory() as tmp:
+            dec = os.path.join(tmp, "decisions.json")
+            with open(dec, "w", encoding="utf-8") as fh:
+                json.dump({"claim-003": {"decision": "reject", "verdict": "supported"}}, fh)
+            data = os.path.join(tmp, "data")
+            os.makedirs(data)
+            with open(os.path.join(data, "sources.csv"), "w", encoding="utf-8", newline="") as fh:
+                fh.write("file,sha256\n" + "".join(f"{x['file']},{x['sha256']}\n" for x in FILES))
+            report = os.path.join(tmp, "r.md")
+            with open(report, "w", encoding="utf-8") as fh:
+                fh.write("x\n")
+            fake_ctx = mock.Mock(checksums={"status": "verified"})
+            err = io.StringIO()
+            with mock.patch.object(mod.E, "extract_claims", return_value=(["c"], [])), \
+                    mock.patch.object(mod.E, "Context", return_value=fake_ctx), \
+                    mock.patch.object(mod.E, "audit", return_value=make_doc()), \
+                    contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                code = mod.main([report, "--data-dir", data, "--out", os.path.join(tmp, "audit.json"), "--decisions", dec])
+            self.assertEqual(code, 2)
+            self.assertIn(AJ.BLOCKED_OVERRIDE_ERROR, err.getvalue())
+            self.assertNotIn(self.BLOCKED_TEXT, err.getvalue())
+            self.assertFalse(os.path.exists(os.path.join(tmp, "audit.json")))
 
 
 def load_make_audit():

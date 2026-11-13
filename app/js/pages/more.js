@@ -1,6 +1,6 @@
-import { h, fmtNum, fmtValue, pct, store } from '../util.js';
+import { h, fmtNum, fmtValue, pct, plural, store } from '../util.js';
 import { state, findings, byId, isBlocked, hasNumber, decisions, reviewStatus, FLAG_TEXT, VERDICT } from '../state.js';
-import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, factLine } from '../ui.js';
+import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, factLine, stackTable } from '../ui.js';
 
 const enc = encodeURIComponent;
 
@@ -45,7 +45,7 @@ export function comparePage(q) {
     const cell = (f, k) => h('td', { class: diff ? 'diff' : null }, diff ? h('span', { class: 'diff-tag' }, 'Differs') : null, node ? node(f) : k);
     return h('tr', {}, h('th', { scope: 'row' }, label), cell(a, ka), cell(b, kb));
   });
-  root.append(h('div', { class: 'table-wrap' }, h('table', { class: 'cmp' }, h('thead', {}, head), h('tbody', {}, body))),
+  root.append(h('div', { class: 'table-wrap' }, stackTable(h('table', { class: 'cmp' }, h('thead', {}, head), h('tbody', {}, body)))),
     h('p', { class: 'muted' }, 'Rows marked Differs have different values for the two claims.'));
   return { view: root, crumbs: breadcrumbs([{ label: 'Results', href: '#/results' }, { label: 'Compare' }]) };
 }
@@ -97,14 +97,14 @@ export function summaryPage() {
     h('p', { class: 'muted' }, (d.report_title || 'Report') + ' | ' + ((d.data_release && d.data_release.name) || 'unknown release') + ' | source ' + state.source + (d.is_mock ? ' | SAMPLE DATA' : '')),
     h('div', { class: 'row no-print', style: 'margin-bottom:16px' },
       h('button', { class: 'btn primary', type: 'button', onclick: () => window.print() }, 'Print this page'), exportButtons()),
-    h('section', { class: 'card' }, h('h2', {}, 'Counts'), h('p', {}, all.length + ' claims. ' + n('supported') + ' supported, ' + n('contradicted') + ' contradicted, ' + n('insufficient_evidence') + ' insufficient evidence, ' + all.filter((x) => x.needs_human_review).length + ' need review, ' + all.filter(isBlocked).length + ' blocked. '
-      + all.filter((x) => reviewStatus(x) === 'overridden').length + ' verdicts overridden by a reviewer.')));
+    h('section', { class: 'card' }, h('h2', {}, 'Counts'), h('p', {}, plural(all.length, 'claim') + '. ' + n('supported') + ' supported, ' + n('contradicted') + ' contradicted, ' + n('insufficient_evidence') + ' insufficient evidence, ' + plural(all.filter((x) => x.needs_human_review).length, 'needs review', 'need review') + ', ' + all.filter(isBlocked).length + ' blocked. '
+      + plural(all.filter((x) => reviewStatus(x) === 'overridden').length, 'verdict') + ' overridden by a reviewer.')));
   root.append(h('section', { class: 'card' }, h('h2', {}, 'Review decisions'),
-    h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Claim', 'Original verdict', 'Reviewer verdict', 'Status', 'Note'].map((t) => h('th', { scope: 'col' }, t)))),
+    h('div', { class: 'table-wrap' }, stackTable(h('table', {}, h('thead', {}, h('tr', {}, ['Claim', 'Original verdict', 'Reviewer verdict', 'Status', 'Note'].map((t) => h('th', { scope: 'col' }, t)))),
       h('tbody', {}, all.map((f) => { const x = dec[f.id] || {}, st = reviewStatus(f);
         return h('tr', { class: st === 'overridden' ? 'overridden' : null }, h('td', {}, h('a', { href: '#/claim/' + enc(f.id) }, f.id), ' ' + f.claim_text),
           h('td', {}, vText(f.verdict)), h('td', {}, st === 'pending' || st === 'more_evidence_requested' ? 'none' : vText(x.verdict || f.verdict)),
-          h('td', {}, st === 'overridden' ? '⚑ Overridden' : st === 'accepted' ? '✓ Accepted' : st === 'more_evidence_requested' ? 'More evidence requested' : 'Not reviewed yet'), h('td', {}, x.note || '')); })))),
+          h('td', {}, st === 'overridden' ? '⚑ Overridden' : st === 'accepted' ? '✓ Accepted' : st === 'more_evidence_requested' ? 'More evidence requested' : 'Not reviewed yet'), h('td', {}, x.note || null)); }))))),
     h('a', { class: 'btn no-print', href: '#/review' }, 'Open the review queue')));
   root.append(h('section', { class: 'card' }, h('h2', {}, 'All claims and limitations'),
     all.map((f) => h('div', { style: 'margin-bottom:14px;break-inside:avoid' }, h('div', { class: 'row' }, verdictBadge(f), h('b', {}, f.id), headlineText(f) ? h('span', {}, headlineText(f)) : null), h('div', {}, f.claim_text),

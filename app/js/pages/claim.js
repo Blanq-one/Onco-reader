@@ -1,4 +1,4 @@
-import { h, countUp, copyText, toast, fmtNum, fmtValue, pct } from '../util.js';
+import { h, countUp, copyText, toast, fmtNum, fmtValue, pct, plural } from '../util.js';
 import { state, findings, isBlocked, cannotAnswer, hasNumber, VERDICT, FLAG_TEXT } from '../state.js';
 import { verdictBadge, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs } from '../ui.js';
 
@@ -76,7 +76,7 @@ function calcPanel(f) {
     h('h3', {}, 'Calculation'), h('pre', {}, e.calculation || 'No calculation text.'),
     h('h3', {}, 'Source files'),
     (e.source_files || []).length ? h('ul', { class: 'mono' }, e.source_files.map((s) => h('li', {}, s))) : h('p', { class: 'muted' }, 'No source files. Nothing was computed.'),
-    h('p', { class: 'muted' }, 'Metric ' + (e.metric_name || 'unknown') + ', value ' + fmtValue(e.value) + ', ' + fmtNum(e.n_samples) + ' of ' + fmtNum(e.denominator) + ' samples.'),
+    h('p', { class: 'muted' }, 'Metric ' + (e.metric_name || 'unknown') + ', value ' + fmtValue(e.value) + ', ' + fmtNum(e.n_samples) + ' of ' + plural(e.denominator, 'sample') + '.'),
     h('button', { class: 'btn', type: 'button', onclick: async () => {
       const txt = [f.id + ': ' + f.claim_text, 'Verdict: ' + f.verdict, 'Metric: ' + e.metric_name + ' = ' + fmtValue(e.value) + ' (' + e.n_samples + ' of ' + e.denominator + ')',
         'Calculation: ' + e.calculation, 'Sources: ' + (e.source_files || []).join(', '), 'Limitation: ' + f.limitation].join('\n');

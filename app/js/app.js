@@ -19,13 +19,25 @@ export const go = (hash) => { location.hash = hash; };
 
 function buildShell() {
   const top = document.getElementById('topbar');
+  // On a phone the menu collapses behind one small button (see .menu-btn in app.css); on wider screens it is always shown.
+  const menuBtn = h('button', { class: 'btn menu-btn', type: 'button', id: 'menu-btn', 'aria-expanded': 'false', 'aria-controls': 'top-menu', onclick: () => setMenu(!top.classList.contains('open')) }, 'Menu');
   top.replaceChildren(
     h('a', { class: 'brand', href: '#/' }, 'Evidence Navigator'),
-    h('nav', { 'aria-label': 'Main' }, NAV.map(([href, label]) => h('a', { href, 'data-nav': href }, label))),
-    h('button', { class: 'btn', type: 'button', id: 'theme', onclick: toggleTheme }, ''),
-    h('button', { class: 'btn', type: 'button', 'aria-label': 'Keyboard shortcuts', onclick: openHelp }, '?'));
+    menuBtn,
+    h('div', { class: 'top-menu', id: 'top-menu' },
+      h('nav', { 'aria-label': 'Main' }, NAV.map(([href, label]) => h('a', { href, 'data-nav': href }, label))),
+      h('button', { class: 'btn', type: 'button', id: 'theme', onclick: toggleTheme }, ''),
+      h('button', { class: 'btn', type: 'button', 'aria-label': 'Keyboard shortcuts', onclick: openHelp }, '?', h('span', { class: 'phone-only', 'aria-hidden': 'true' }, ' Keyboard shortcuts'))));
   setThemeLabel();
   document.body.append(helpDialog());
+}
+function setMenu(open, refocus) {
+  const top = document.getElementById('topbar'), b = document.getElementById('menu-btn');
+  if (!top || !b) return;
+  top.classList.toggle('open', open);
+  b.setAttribute('aria-expanded', String(open));
+  b.textContent = open ? 'Close menu' : 'Menu';
+  if (refocus) b.focus();
 }
 function setThemeLabel() {
   const light = document.documentElement.dataset.theme === 'light';
@@ -60,6 +72,7 @@ function foot() {
 }
 
 function route() {
+  setMenu(false);
   const r = parseHash();
   if (current.path === '/results') state.scroll = window.scrollY;
   const prev = current.path;
@@ -99,6 +112,7 @@ window.addEventListener('hashchange', route);
 
 document.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'Escape' && document.getElementById('topbar').classList.contains('open')) { setMenu(false, true); return; }
   const tag = (e.target.tagName || '').toLowerCase();
   const typing = ['input', 'textarea', 'select'].includes(tag) || e.target.isContentEditable;
   if (document.querySelector('dialog[open]')) return;

@@ -57,6 +57,21 @@ FILE_WITH_NOTE = re.compile(r"^(\S+)\s*\((.+)\)\s*$")  # "sample_manifest.csv (s
 # review.json: the app's approve / reject / ask-for-more buttons (app/js/state.js)
 REVIEW_DECISIONS = ("approve", "reject", "more")
 REVIEW_STATUSES = ("pending", "accepted", "overridden", "more_evidence_requested")
+# A finding stopped by one of these guardrail flags was never computed, so there is no
+# result a reviewer could override. Same set as src/guardrails BLOCKING_FLAGS (a test
+# keeps them equal) and as BLOCKED in app/js/state.js.
+BLOCKING_FLAGS = frozenset({
+    "clinical_claim_blocked", "individual_level_request_blocked", "reidentification_blocked",
+    "phi_like_input", "prompt_injection_suspected", "invalid_input",
+})
+# Fixed text: it never includes claim text or a reviewer's note. Same words as the app.
+BLOCKED_OVERRIDE_ERROR = ("a blocked claim cannot be overridden; "
+                          "accept it as insufficient evidence or ask for more evidence")
+BLOCKED_ACCEPT_VERDICT = "insufficient_evidence"
+
+
+def is_blocked(f):
+    return bool(set(f.get("guardrail_flags") or []) & BLOCKING_FLAGS)
 
 
 # ---------- release files ----------
@@ -295,6 +310,10 @@ def build_review(doc, decisions=None, audit_file="audit.json"):
       {"claim-002": {"decision": "approve" | "reject" | "more", "note": "...", "at": "ISO time",
                      "verdict": optional replacement verdict, "reviewer_role": optional}}
     Decisions for ids that are not in this audit are ignored and listed under ignored_decision_ids.
+
+    Blocked findings (any flag in BLOCKING_FLAGS) may only be accepted, which records them as
+    insufficient evidence, or sent back with "more". A "reject" or any other human verdict on
+    a blocked finding raises ValueError("<id>: " + BLOCKED_OVERRIDE_ERROR).
     """
     decisions = decisions or {}
     if not isinstance(decisions, dict):
@@ -310,10 +329,15 @@ def build_review(doc, decisions=None, audit_file="audit.json"):
             raise ValueError(f"{fid}: decision {choice!r} is not one of {list(REVIEW_DECISIONS)}")
         if human is not None and human not in VERDICTS:
             raise ValueError(f"{fid}: verdict {human!r} is not one of {list(VERDICTS)}")
+        blocked = is_blocked(f)
+        if blocked and (choice == "reject" or human not in (None, BLOCKED_ACCEPT_VERDICT)):
+            raise ValueError(f"{fid}: {BLOCKED_OVERRIDE_ERROR}")
         if choice == "approve" and human is None:
-            human = verdict
+            human = BLOCKED_ACCEPT_VERDICT if blocked else verdict
         if choice == "more":
             status = "more_evidence_requested"
+        elif choice == "approve" and blocked:
+            status = "accepted"  # accepted as insufficient evidence
         elif choice == "reject" or (human is not None and human != verdict):
             status = "overridden"
         elif choice == "approve":

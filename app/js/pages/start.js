@@ -1,6 +1,7 @@
-import { h, store, fmtNum, toast } from '../util.js';
+import { h, store, fmtNum, plural, toast } from '../util.js';
 import { state, loadData, findings, dataParam, DEMO_FILE } from '../state.js';
 import { checkHealth, extractReport, pdfText } from '../live.js';
+import { stackTable } from '../ui.js';
 
 const rerender = () => window.dispatchEvent(new Event('hashchange'));
 const MAX_CHARS = 100000;
@@ -40,7 +41,7 @@ export function startPage() {
   const demo = h('section', { class: 'card', 'aria-labelledby': 'demo-h' }, h('h2', { id: 'demo-h' }, 'Demo mode'),
     h('p', { class: 'muted' }, 'Works without a server. Shows the precomputed audit of the practice report from ' + DEMO_FILE.replace('out/', 'out/') + '.'),
     h('div', { class: 'row' }, demoBtn,
-      d ? h('a', { class: 'btn', href: '#/results' }, 'Open the loaded results (' + fmtNum(findings().length) + ' claims)') : null,
+      d ? h('a', { class: 'btn', href: '#/results' }, 'Open the loaded results (' + plural(findings().length, 'claim') + ')') : null,
       h('a', { class: 'btn', href: '#/about' }, 'How this works and what it will not do')), demoMsg);
   if (d) demo.append(h('div', { class: 'checks' }, h('span', { class: 'chip' }, 'Release: ' + ((d.data_release && d.data_release.name) || 'unknown')), checksumBadge(d),
     h('span', { class: 'chip' }, 'Report: ' + (d.report_title || 'untitled')), dataParam() ? h('span', { class: 'chip' }, 'Loaded from ?data=' + dataParam()) : null));
@@ -119,12 +120,12 @@ export function aboutPage() {
   const notes = d && d.data_notes;
   const sec = h('section', { class: 'card' }, h('h2', {}, 'Which clinical column was used and why'));
   if (!notes || !notes.length) sec.append(h('p', { class: 'muted' }, 'This findings file has no data notes.'));
-  else sec.append(h('div', { class: 'table-wrap' }, h('table', {},
+  else sec.append(h('div', { class: 'table-wrap' }, stackTable(h('table', {},
     h('thead', {}, h('tr', {}, ['Attribute', 'Column used', 'Chosen because', 'Recorded', 'Alternatives'].map((t) => h('th', { scope: 'col' }, t)))),
     h('tbody', {}, notes.map((n) => h('tr', {},
       h('td', {}, n.attribute), h('td', { class: 'mono' }, n.column_used), h('td', {}, n.chosen_by),
       h('td', {}, fmtNum(n.primary_tumors_with_recorded_value) + ' of ' + fmtNum(n.primary_tumors)),
-      h('td', {}, (n.alternatives || []).length ? (n.alternatives).map((a) => h('div', { class: 'mono' }, a.column + ' (' + fmtNum(a.primary_tumors_with_recorded_value) + ')')) : 'none')))))));
+      h('td', {}, (n.alternatives || []).length ? (n.alternatives).map((a) => h('div', { class: 'mono' }, a.column + ' (' + fmtNum(a.primary_tumors_with_recorded_value) + ')')) : 'none'))))))));
   root.append(sec);
   const ic = d && d.interpretation_config;
   if (ic) root.append(h('section', { class: 'card' }, h('h2', {}, 'How wording is read'),

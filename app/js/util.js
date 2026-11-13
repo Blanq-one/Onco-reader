@@ -27,6 +27,8 @@ function add(el, kids) {
 export const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 export const pct = (n, d) => (d ? (100 * n / d).toFixed(1) + '%' : 'n/a');
 export function fmtNum(n) { return n == null ? 'n/a' : Number(n).toLocaleString('en-US'); }
+// "1 claim", "2 claims", "1 needs review" / "3 need review": count text always agrees with its number.
+export const plural = (n, one, many) => fmtNum(n) + ' ' + (Number(n) === 1 ? one : (many || one + 's'));
 export function fmtValue(v) {
   if (v == null) return 'no value';
   return Number.isInteger(v) ? fmtNum(v) : (v * 100).toFixed(1) + '%';

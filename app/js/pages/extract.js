@@ -1,6 +1,6 @@
-import { h, fmtNum } from '../util.js';
+import { h, fmtNum, plural } from '../util.js';
 import { state, extractData } from '../state.js';
-import { breadcrumbs } from '../ui.js';
+import { breadcrumbs, stackTable } from '../ui.js';
 import { runAudit } from '../live.js';
 
 export function extractPage() {
@@ -10,13 +10,13 @@ export function extractPage() {
   root.append(h('h1', {}, 'Extraction: what will be checked'));
   const claims = ex.claims, skipped = ex.skipped;
   const canRun = state.mode === 'live-extract' && state.live && !!state.reportText;
-  root.append(h('p', { class: 'muted' }, fmtNum(claims.length) + ' claims found, ' + fmtNum(skipped.length) + ' sentences skipped. Check that each claim matches the sentence it came from before the audit runs.'));
+  root.append(h('p', { class: 'muted' }, plural(claims.length, 'claim') + ' found, ' + plural(skipped.length, 'sentence') + ' skipped. Check that each claim matches the sentence it came from before the audit runs.'));
 
   root.append(h('section', { class: 'card', 'aria-labelledby': 'cl-h' }, h('h2', { id: 'cl-h' }, 'Claims and their source sentences'),
-    claims.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'ex' },
+    claims.length ? h('div', { class: 'table-wrap' }, stackTable(h('table', { class: 'ex' },
       h('thead', {}, h('tr', {}, ['#', 'Claim to check', 'Sentence it came from'].map((t) => h('th', { scope: 'col' }, t)))),
       h('tbody', {}, claims.map((c, i) => h('tr', {}, h('td', {}, String(i + 1)), h('td', {}, c.text),
-        h('td', { class: c.source === c.text ? 'muted' : null }, c.source === c.text ? 'Same sentence' : c.source))))))
+        h('td', { class: c.source === c.text ? 'muted' : null }, c.source === c.text ? 'Same sentence' : c.source)))))))
       : h('p', { class: 'muted' }, 'No checkable claims were found in this report.')));
 
   root.append(h('details', { class: 'card', id: 'skipped' }, h('summary', {}, 'Skipped sentences (' + fmtNum(skipped.length) + ')'),
@@ -33,9 +33,9 @@ export function extractPage() {
     go.onclick = async () => {
       ctl = new AbortController(); go.disabled = true; cancel.hidden = false;
       const t0 = Date.now();
-      const msg = h('span', {}, 'Checking ' + claims.length + ' claims against the data...');
+      const msg = h('span', {}, 'Checking ' + plural(claims.length, 'claim') + ' against the data...');
       status.replaceChildren(h('div', { class: 'progress indet', 'aria-hidden': 'true' }, h('i')), msg);
-      timer = setInterval(() => { msg.textContent = 'Checking ' + claims.length + ' claims against the data... ' + Math.round((Date.now() - t0) / 1000) + ' s'; }, 1000);
+      timer = setInterval(() => { msg.textContent = 'Checking ' + plural(claims.length, 'claim') + ' against the data... ' + Math.round((Date.now() - t0) / 1000) + ' s'; }, 1000);
       try {
         await runAudit(ctl.signal);
         location.hash = '#/results'; window.dispatchEvent(new Event('hashchange'));

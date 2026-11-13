@@ -119,7 +119,8 @@ def main(argv=None):
         review_flag = "yes" if f["needs_human_review"] else "no"
         print(f"{f['id']}  {f['claim_verdict']:<22} review={review_flag:<4}{extra}")
     counts = ", ".join(f"{k} {v}" for k, v in review["counts"].items() if v)
-    print(f"\nSaved {out}  ({len(audit['findings'])} claim_check findings)")
+    n = len(audit["findings"])
+    print(f"\nSaved {out}  ({n} claim_check finding{'' if n == 1 else 's'})")
     print(f"Saved {review_out}  (review queue: {counts or 'empty'})")
     try:
         shown = os.path.relpath(out).replace(os.sep, "/")
