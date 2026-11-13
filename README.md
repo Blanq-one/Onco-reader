@@ -58,7 +58,7 @@ Both repos sit side by side in one folder: the organizers' `challenge-ref` (it h
 # 1. Get both repos, side by side
 mkdir hackathon; cd hackathon
 git clone https://github.com/disleveK/oncosys-hackathon-challenge.git challenge-ref
-git clone <URL of this repo> onco-evidence
+git clone https://github.com/Blanq-one/Onco-reader.git onco-evidence
 
 # 2. Download the TCGA-BRCA data (fetch.py checks every file against the frozen checksums)
 cd challenge-ref
@@ -90,7 +90,7 @@ If Windows says `python` is not found, use `py` instead.
 # 1. Get both repos, side by side
 mkdir hackathon && cd hackathon
 git clone https://github.com/disleveK/oncosys-hackathon-challenge.git challenge-ref
-git clone <URL of this repo> onco-evidence
+git clone https://github.com/Blanq-one/Onco-reader.git onco-evidence
 
 # 2. Download the TCGA-BRCA data (fetch.py checks every file against the frozen checksums)
 cd challenge-ref
