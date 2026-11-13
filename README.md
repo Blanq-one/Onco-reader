@@ -178,6 +178,14 @@ curl -s -X POST http://127.0.0.1:8000/api/audit -H 'Content-Type: application/js
 
 To save `audit.json` from PowerShell, use `Invoke-WebRequest ... -OutFile audit.json`, not `Out-File`. Windows PowerShell 5.1 adds a byte-order mark that the organizers' validator can't read. `scripts/make_audit.py` writes the file correctly.
 
+## If the answer key splits sentences
+
+Some sentences hold more than one claim, for example "Luminal A is the largest RNA subtype, accounting for about 62% of tumors". The engine checks each part and gives the sentence its worst verdict. By default `audit.json` has **one finding per sentence**, with the parts listed in its evidence.
+
+If the organizers' answer key lists each part as its own claim, set `SPLIT_SUBCLAIMS = True` at the top of `src/export/audit_json.py`, then make `audit.json` again (`scripts/make_audit.py`, or restart the server for the app's download). Each part then becomes its own `claim_check` finding with its own `claim_text`, verdict and `correct_value`, with ids such as `claim-002.1` and `claim-002.2`. The sentence-level finding is left out for those sentences. Sentences with one claim come out the same either way. A part's `claim_text` is the part as the engine checked it. The full sentence, as written in the report, is quoted in that finding's evidence.
+
+Both settings pass the organizers' validator.
+
 ## Limits
 
 - **Request size:**
@@ -199,11 +207,15 @@ To save `audit.json` from PowerShell, use `Invoke-WebRequest ... -OutFile audit.
 - **Data scope:**
   - Results describe the frozen TCGA-BRCA release fetched by `challenge-ref`, and nothing else.
   - If the files don't match the frozen checksums, every limitation says so.
-- **Claims it understands:** the engine reads claims as small templates:
+- **Claims it understands:** the engine (v1.3.0) reads claims as small templates:
   - coverage of a data layer, and overlap between layers;
-  - counts and group sizes;
-  - survival events;
+  - counts and group sizes, sample types (metastatic, normal tissue) and slide counts (diagnostic, frozen);
+  - ranges ("between 40% and 50%"), word fractions ("about a third") and ratios ("about two to one");
+  - how often a named gene is mutated, and which gene is mutated most often;
+  - survival events, and survival comparisons (shown with each group's deaths, never judged);
   - "large enough for" readiness questions.
+
+  The full list is at the top of `src/engine/engine.py`.
 
   Anything else gets "insufficient evidence" with a note on what data would be needed.
 - **Guardrail coverage:**

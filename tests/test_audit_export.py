@@ -520,5 +520,90 @@ class TestPracticeBriefEndToEnd(unittest.TestCase):
         self.assertEqual(VALIDATOR.check(self.out), [])
 
 
+class TestSplitSubclaims(unittest.TestCase):
+    """SPLIT_SUBCLAIMS: one finding per sentence (default) or one finding per part of a multi-part sentence."""
+
+    def build(self, split=None, doc=None):
+        return AJ.build_audit(doc or make_doc(), FILES, split_subclaims=split)
+
+    def test_default_is_one_finding_per_sentence(self):
+        self.assertFalse(AJ.SPLIT_SUBCLAIMS)
+        self.assertEqual([f["id"] for f in self.build()["findings"]], ["claim-001", "claim-002", "claim-003"])
+        self.assertEqual([f["id"] for f in self.build(False)["findings"]], ["claim-001", "claim-002", "claim-003"])
+
+    def test_split_gives_each_part_its_own_finding(self):
+        a = self.build(True)
+        f = by_id(a)
+        self.assertEqual(list(f), ["claim-001", "claim-002.1", "claim-002.2", "claim-003"])
+        self.assertNotIn("claim-002", f)  # the sentence-level finding is not emitted
+        p1, p2 = f["claim-002.1"], f["claim-002.2"]
+        self.assertEqual((p1["claim_text"], p1["claim_verdict"], p1["severity"]),
+                         ("Luminal A is the largest RNA subtype.", "supported", "none"))
+        self.assertNotIn("correct_value", p1)
+        self.assertEqual((p2["claim_text"], p2["claim_verdict"], p2["correct_value"]),
+                         ("Luminal A accounts for about 62%.", "contradicted", "49.9% (421 of 844)"))
+        sentence = [r for r in p2["evidence"] if r["kind"] == "claim" and r["id"] == "claim-002"]
+        self.assertEqual(len(sentence), 1)
+        self.assertIn("Luminal A is the largest RNA subtype, accounting for about 62%", sentence[0]["note"])
+        self.assertEqual(p2["limitation"], f["claim-002.1"]["limitation"])
+
+    def test_module_switch(self):
+        with mock.patch.object(AJ, "SPLIT_SUBCLAIMS", True):
+            self.assertEqual([f["id"] for f in self.build()["findings"]], ["claim-001", "claim-002.1", "claim-002.2", "claim-003"])
+            self.assertEqual(len(self.build(False)["findings"]), 3)  # an explicit argument wins
+
+    def test_single_part_sentences_are_the_same_either_way(self):
+        off, on = by_id(self.build(False)), by_id(self.build(True))
+        for fid in ("claim-001", "claim-003"):
+            self.assertEqual(off[fid], on[fid])
+
+    def test_engine_part_details_are_used(self):
+        doc = make_doc()
+        part = doc["findings"][1]["evidence"]["sub_checks"][1]
+        part.update({"correct_value": "49.9% (421 of 844 tumors with a call)", "needs_human_review": True,
+                     "review_reason": "Close to the tolerance.", "calculation": "Part calculation.", "metric_name": "share_luminal_a"})
+        p2 = by_id(self.build(True, doc))["claim-002.2"]
+        self.assertEqual(p2["correct_value"], "49.9% (421 of 844 tumors with a call)")
+        self.assertTrue(p2["needs_human_review"])
+        self.assertEqual(p2["confidence"], "medium")
+        self.assertIn("Part calculation.", [r for r in p2["evidence"] if r["kind"] == "analysis"][0]["note"])
+
+    @unittest.skipIf(VALIDATOR is None, NO_VALIDATOR)
+    def test_both_settings_pass_the_organizers_validator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for split in (False, True):
+                path = os.path.join(tmp, f"audit_{split}.json")
+                AJ.write_json(self.build(split), path)
+                self.assertEqual(VALIDATOR.check(path), [], split)
+
+
+@unittest.skipIf(DATA_DIR is None or not os.path.isfile(BRIEF), "TCGA-BRCA data or the practice brief not found")
+class TestSplitSubclaimsPracticeBrief(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from src.engine import engine as E
+        with open(BRIEF, encoding="utf-8") as fh:
+            claims, skipped = E.extract_claims(fh.read())
+        cls.doc = E.audit(E.Context(DATA_DIR), claims, "practice_brief.md", skipped)
+        cls.files = AJ.read_sources(DATA_DIR)
+
+    def test_parts_and_verdicts(self):
+        on = AJ.build_audit(self.doc, self.files, split_subclaims=True)
+        self.assertEqual([(f["id"], f["claim_verdict"]) for f in on["findings"]],
+                         [("claim-001.1", "supported"), ("claim-001.2", "supported"), ("claim-002.1", "supported"),
+                          ("claim-002.2", "contradicted"), ("claim-003", "insufficient_evidence")])
+        self.assertEqual(by_id(on)["claim-002.2"]["correct_value"], "49.9% (421 of 844)")
+        off = AJ.build_audit(self.doc, self.files, split_subclaims=False)
+        self.assertEqual([f["claim_verdict"] for f in off["findings"]], ["supported", "contradicted", "insufficient_evidence"])
+
+    @unittest.skipIf(VALIDATOR is None, NO_VALIDATOR)
+    def test_both_settings_pass_the_organizers_validator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for split in (False, True):
+                path = os.path.join(tmp, f"audit_{split}.json")
+                AJ.write_json(AJ.build_audit(self.doc, self.files, split_subclaims=split), path)
+                self.assertEqual(VALIDATOR.check(path), [], split)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -39,6 +39,15 @@ import os
 import re
 from collections import OrderedDict
 
+# One finding per sentence (False, the default), or one finding per part of a sentence (True).
+# The engine checks a sentence with several claims in it ("Luminal A is the largest subtype, about 62% of
+# tumors") part by part and gives the sentence the worst verdict, with the parts in evidence.sub_checks.
+# If the organizers' answer key lists each part as its own claim, set this to True: every part becomes its
+# own claim_check finding (id "claim-002.1", "claim-002.2", ...) with its own claim_text, verdict and
+# correct_value, and the sentence-level finding is not emitted for that sentence. Sentences with one part
+# are exported the same way either way. See "If the answer key splits sentences" in README.md.
+SPLIT_SUBCLAIMS = False
+
 FORMAT_VERSION = "0.2"
 DATASET = "TCGA-BRCA"
 DEFAULT_RELEASE = "raw"  # the organizers' reference output names the fetch.py release "raw"
@@ -113,6 +122,8 @@ def headline(value, n, den, metric=None):
     """The measured figure in words, e.g. '49.9% (421 of 844)' or '535 of 1101'. None when nothing was computed."""
     if value is None or isinstance(value, bool):
         return None
+    if metric and str(metric).startswith("ratio_"):  # engine v1.3 ratio claims: value is the ratio, n is the first group
+        return f"{value:.2f} to 1 ({n} of {den} in the two groups are in the first)"
     if _is_share(metric, value, n, den):
         return f"{value * 100:.1f}% ({n} of {den})"
     if isinstance(value, int) and n == den == value:
@@ -266,6 +277,46 @@ def claim_check(f, release=DEFAULT_RELEASE, listed_files=(), checksum_note=None)
     return out
 
 
+def part_checks(f, release=DEFAULT_RELEASE, listed_files=(), checksum_note=None):
+    """SPLIT_SUBCLAIMS: one claim_check finding per part of a multi-part sentence, each with its own verdict.
+
+    Each part is turned back into an engine-shaped finding and exported with claim_check(), so it gets the same
+    summary, severity, confidence and evidence rules as a whole sentence. The part keeps the sentence's
+    limitation; its claim_text is the part as the engine checked it, and an evidence pointer quotes the
+    sentence as written in the report.
+    """
+    ev = f.get("evidence") or {}
+    parts = ev.get("sub_checks") or []
+    written = str(f.get("source_sentence") or f.get("claim_text") or "").strip()
+    out = []
+    for i, part in enumerate(parts, 1):
+        verdict = part.get("verdict")
+        has_own_review = "needs_human_review" in part
+        pf = {
+            "id": f"{f['id']}.{i}",
+            "claim_text": str(part.get("claim") or "").strip(),
+            "source_sentence": str(part.get("claim") or "").strip(),
+            "verdict": verdict,
+            "correct_value": {"text": part["correct_value"]} if part.get("correct_value") else None,
+            "evidence": {"metric_name": part.get("metric_name") or ev.get("metric_name"), "value": part.get("value"),
+                         "n_samples": part.get("n_samples"), "denominator": part.get("denominator"),
+                         "calculation": part.get("calculation") or ev.get("calculation"),
+                         "source_files": part.get("source_files") or ev.get("source_files") or []},
+            "cohort_trace": [],
+            "limitation": f.get("limitation"),
+            "needs_human_review": bool(part.get("needs_human_review")) if has_own_review else bool(f.get("needs_human_review")),
+            "review_reason": part.get("review_reason") if has_own_review else f.get("review_reason"),
+            "guardrail_flags": part.get("guardrail_flags", f.get("guardrail_flags") or []),
+            "robustness": None,
+            "missing_evidence": f.get("missing_evidence") if verdict == "insufficient_evidence" else None,
+        }
+        cc = claim_check(pf, release, listed_files, checksum_note)
+        cc["evidence"][0]["note"] = f"Part {i} of {len(parts)} of one sentence, as checked."
+        cc["evidence"].insert(1, _ref("claim", f["id"], note="The whole sentence as written in the report: " + written))
+        out.append(cc)
+    return out
+
+
 # ---------- whole document ----------
 def checksum_warning(doc):
     """A sentence for every limitation when the engine could not confirm the frozen checksums, else None."""
@@ -276,8 +327,12 @@ def checksum_warning(doc):
             f"(checksum status: {status}), so these results may not describe the frozen release.")
 
 
-def build_audit(doc, files, release=DEFAULT_RELEASE, team=DEFAULT_TEAM, question=None, allow_mock=False):
-    """The engine's findings document -> audit.json (shared format v0.2) as an ordered dict."""
+def build_audit(doc, files, release=DEFAULT_RELEASE, team=DEFAULT_TEAM, question=None, allow_mock=False, split_subclaims=None):
+    """The engine's findings document -> audit.json (shared format v0.2) as an ordered dict.
+
+    split_subclaims: None follows the module switch SPLIT_SUBCLAIMS; True or False overrides it for this call.
+    """
+    split = SPLIT_SUBCLAIMS if split_subclaims is None else bool(split_subclaims)
     if not isinstance(doc, dict) or not isinstance(doc.get("findings"), list):
         raise ValueError("not a findings document (no findings list)")
     if doc.get("is_mock") and not allow_mock:
@@ -292,13 +347,22 @@ def build_audit(doc, files, release=DEFAULT_RELEASE, team=DEFAULT_TEAM, question
     title = doc.get("report_title") or "the report"
     q = question or (f"Which claims in {title} does the TCGA-BRCA release '{release}' support, contradict, "
                      f"or leave without enough evidence?")
+    out_findings = []
+    for f in doc["findings"]:
+        if split and len((f.get("evidence") or {}).get("sub_checks") or []) > 1:
+            out_findings.extend(part_checks(f, release, listed, warn))
+        else:
+            out_findings.append(claim_check(f, release, listed, warn))
+    out_ids = [x["id"] for x in out_findings]
+    if len(out_ids) != len(set(out_ids)):
+        raise ValueError("duplicate finding ids after splitting sentences into parts")
     return OrderedDict([
         ("format_version", FORMAT_VERSION),
         ("producer", OrderedDict([("team", team), ("product", PRODUCT), ("track", TRACK)])),
         ("data", OrderedDict([("dataset", DATASET),
                               ("releases", [OrderedDict([("name", release), ("files", [OrderedDict(x) for x in files])])])])),
         ("question", q),
-        ("findings", [claim_check(f, release, listed, warn) for f in doc["findings"]]),
+        ("findings", out_findings),
     ])
 
 
