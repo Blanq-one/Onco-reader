@@ -1204,7 +1204,62 @@ def split_subclaims(text):
                  r"(?P<what>[^,]*?),\s*(?:accounting for|making up|representing|comprising|constituting|which (?:accounts for|makes up|represents))\s+(?P<tail>.+)$", t, re.I)
     if m:
         return [f"{m.group('subj')} is the {m.group('ext')}{m.group('what')}.", f"{m.group('subj')} accounts for {m.group('tail').strip()}"]
-    return [t]
+    return split_counts(t) or [t]
+
+
+COUNT_NOUN = r"(samples?|patients?|tumou?rs?|cases?|slides?|sections?|metastas[ie]s)"
+RANGE_WORDS = re.compile(r"\bbetween\s+[\d,.]+\s*(?:%|percent)?\s*and\s+\d|\bfrom\s+[\d,.]+\s*(?:%|percent)?\s*to\s+\d|\d\s*(?:-|–|to)\s*\d")
+COUNT_VERB = re.compile(r"\b(?:are|is|were|was|have|has|had|holds?|contains?|includes?|comprises?|exist|number|total)\b", re.I)
+
+
+def split_counts(t):
+    """'There are 7 metastatic and 139 normal-tissue samples' -> one plain count per number, or None.
+
+    The sentence is cut at the connector between two numbers ('and', 'from', a comma). A part that
+    leaves its noun out borrows it from a neighbour ('7 metastatic' -> '7 metastatic samples';
+    '139 are normal tissue' -> '139 samples are normal tissue'). Nothing is split unless every part
+    reads as a plain count (population, sample type, slides or a group size)."""
+    low = t.lower()
+    if re.search(r"%|percent|per cent", low) or RANGE_WORDS.search(low):
+        return None
+    nums = list(re.finditer(r"(?<![\w.,])\d[\d,]*(?:\.\d+)?", t))
+    if len(nums) < 2:
+        return None
+    parts, start = [], 0
+    for a, b in zip(nums, nums[1:]):
+        between = t[a.end():b.start()]
+        cut = None
+        for cm in re.finditer(r",?\s*\b(?:and|from|across|plus)\b\s*|[,;]\s*", between):
+            cut = cm  # the last connector before the next number
+        if cut is None:
+            return None
+        parts.append(t[start:a.end() + cut.start()])
+        start = a.end() + cut.end()
+    parts.append(t[start:])
+    parts = [p.strip().rstrip(".!?").strip() for p in parts]
+    nouns = []
+    for p in parts:
+        m = re.search(r"(?<![\w.,])\d[\d,]*\s+(?:[\w-]+\s+){0,3}?" + COUNT_NOUN + r"\b", p.lower())
+        nouns.append(m.group(1) if m else None)
+    if not any(nouns):
+        return None
+    subs = []
+    for i, p in enumerate(parts):
+        if not nouns[i]:
+            borrowed = next((n for n in nouns[i + 1:] if n), None) or next((n for n in reversed(nouns[:i]) if n), None)
+            m = re.search(r"(?<![\w.,])(\d[\d,]*)(\s+)(?=(?:are|were|is|was|have|has|had)\b)", p)
+            p = p[:m.end(1)] + " " + borrowed + p[m.end(1):] if m else p + " " + borrowed
+        if not COUNT_VERB.search(p):
+            p = "There are " + p
+        subs.append(p + ".")
+    for s in subs:
+        parsed = parse_claim(normalize_claim_text(s))
+        q = parsed.get("quantifier") or {}
+        plain = parsed["type"] in ("popsize", "slidecount") or (
+            parsed["type"] == "measure" and parsed.get("mode") == "group" and q.get("kind") == "count")
+        if not plain:
+            return None
+    return subs
 
 
 VERDICT_RANK = {"supported": 1, "insufficient_evidence": 2, "contradicted": 3}

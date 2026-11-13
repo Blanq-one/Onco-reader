@@ -203,5 +203,61 @@ class TestSampleTypeAndSlideCountsReal(RealCase):
         self.assertEqual((diag, frozen, len(self.slides)), (1133, 1978, 3111))  # the data README's numbers
 
 
+# ---------- item 2: one check per count in a sentence ----------
+def parts(f):
+    return [(p["claim"], p["verdict"], p["n_samples"]) for p in f["evidence"].get("sub_checks", [])]
+
+
+class TestSeveralCountsSynthetic(SyntheticCase):
+    def test_shared_noun_is_borrowed(self):
+        f = check(self.ctx, "There are 2 metastatic and 5 normal-tissue samples.", self)
+        self.assertEqual(parts(f), [("There are 2 metastatic samples.", "supported", 2),
+                                    ("There are 5 normal-tissue samples.", "supported", 5)])
+        self.assertEqual(f["verdict"], "supported")
+
+    def test_elided_noun_after_the_number(self):
+        f = check(self.ctx, "Only 2 samples are metastases, and 5 are normal tissue.", self)
+        self.assertEqual([p[1:] for p in parts(f)], [("supported", 2), ("supported", 5)])
+
+    def test_samples_from_patients(self):
+        f = check(self.ctx, "The release holds 47 samples from 40 patients.", self)
+        self.assertEqual([p[1:] for p in parts(f)], [("supported", 47), ("supported", 40)])
+
+    def test_one_wrong_count_contradicts_the_sentence_and_names_the_real_value(self):
+        f = check(self.ctx, "The release holds 50 samples from 40 patients.", self)
+        self.assertEqual([p[1] for p in parts(f)], ["contradicted", "supported"])
+        self.assertEqual(f["verdict"], "contradicted")
+        self.assertIn("47", cv_text(f))
+        f = check(self.ctx, "There are 3 metastatic and 5 normal-tissue samples.", self)
+        self.assertEqual((f["verdict"], [p[1] for p in parts(f)]), ("contradicted", ["contradicted", "supported"]))
+        self.assertIn("2 metastasis samples", cv_text(f))
+
+    def test_three_counts_and_slides(self):
+        f = check(self.ctx, "The release has 40 primary tumors, 5 normal tissue samples and 2 metastases.", self)
+        self.assertEqual([p[1:] for p in parts(f)], [("supported", 40), ("supported", 5), ("supported", 2)])
+        f = check(self.ctx, "There are 12 diagnostic slides and 9 frozen sections.", self)
+        self.assertEqual([p[1:] for p in parts(f)], [("supported", 12), ("supported", 9)])
+
+    def test_not_split(self):
+        for text in ("In 2018, 40 patients were enrolled.",                      # a year is not a count
+                     "At least 30 ER-positive tumors and 10 deaths are recorded.",  # the second count depends on the first
+                     "Between 30 and 50 primary tumors have survival data."):      # a range is one check
+            self.assertEqual(E.split_subclaims(text), [text], text)
+
+
+class TestSeveralCountsReal(RealCase):
+    def test_counts_match_pandas(self):
+        n_samples, n_patients = len(self.manifest), self.manifest.patient_id.nunique()
+        types = self.manifest.sample_type.value_counts()
+        met, normal = int(types["Metastatic"]), int(types["Solid Tissue Normal"])
+        f = self.run_claim(f"The release holds {n_samples:,} samples from {n_patients:,} patients.")
+        self.assertEqual([p[1:] for p in parts(f)], [("supported", n_samples), ("supported", n_patients)])
+        f = self.run_claim(f"There are {met} metastatic and {normal} normal-tissue samples.")
+        self.assertEqual([p[1:] for p in parts(f)], [("supported", met), ("supported", normal)])
+        f = self.run_claim(f"Only {met} samples are metastases, and {normal + 1} are normal tissue.")
+        self.assertEqual((f["verdict"], [p[1] for p in parts(f)]), ("contradicted", ["supported", "contradicted"]))
+        self.assertIn(f"{normal} normal tissue samples", cv_text(f))
+
+
 if __name__ == "__main__":
     unittest.main()
