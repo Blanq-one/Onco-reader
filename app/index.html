@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evidence Navigator</title>
+<meta name="description" content="Checks claims about TCGA-BRCA against the data and shows the evidence and the limits. Data readiness only.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%238ab4f8'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+<script>try{var t=localStorage.getItem('en.theme');if(t)document.documentElement.dataset.theme=JSON.parse(t)}catch(e){}</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div id="banner-slot"></div>
+<header class="topbar" id="topbar"></header>
+<div id="crumbs-slot"></div>
+<main id="main" tabindex="-1">
+  <div class="page"><div class="skeleton sk-title"></div><div class="skeleton sk-block"></div><div class="skeleton sk-block"></div><p class="muted">Loading findings...</p></div>
+</main>
+<footer class="foot" id="foot"></footer>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<noscript><p class="page">This app needs JavaScript. It has no other dependencies and works offline.</p></noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

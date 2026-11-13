@@ -512,7 +512,7 @@
     },
     {
       "id": "claim-010",
-      "claim_text": "Samples from patient TCGA-XX-0000 show unusual survival.",
+      "claim_text": "Samples from patient [REDACTED] show unusual survival.",
       "verdict": "insufficient_evidence",
       "evidence": {
         "metric_name": "not_computed",
