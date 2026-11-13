@@ -1,4 +1,4 @@
-r"""Evidence engine v1.1.2: turn report claims into checked findings (standard library only).
+r"""Evidence engine v1.1.3: turn report claims into checked findings (standard library only).
 
 Plain English: for each claim in a report it (1) runs the guardrail pre-check,
 (2) reads the claim as a small template, (3) computes the real numbers from the
@@ -48,6 +48,23 @@ try:
     from src.guardrails import redact as _redact  # type: ignore
 except Exception:  # pragma: no cover
     _redact = None
+try:  # the post-check that every finished document must pass before it is written or returned
+    from src.guardrails.postcheck import check_document as _check_document  # type: ignore
+except Exception:  # pragma: no cover
+    try:
+        from src.guardrails import check_document as _check_document  # type: ignore
+    except Exception:
+        _check_document = None
+
+
+class PostCheckError(RuntimeError):
+    """The finished findings document failed the guardrails post-check. .problems holds fixed-text strings, never claim text."""
+
+    def __init__(self, problems):
+        super().__init__("post-check found %d problem(s)" % len(problems))
+        self.problems = list(problems)
+
+
 ALLOW_FALLBACK = False  # set True only by --unsafe-no-guardrails (quick local tests, never for submission)
 
 try:
@@ -819,6 +836,17 @@ def evaluate_claim(ctx, fid, text):
 
 def audit(ctx, claims, title):
     findings = [evaluate_claim(ctx, f"claim-{i:03d}", c) for i, c in enumerate(claims, 1)]
+    doc = _build_document(ctx, findings, title)
+    if not ALLOW_FALLBACK:
+        if _check_document is None:
+            raise RuntimeError("src/guardrails post-check (check_document) is missing or failed to import")
+        problems = _check_document(doc)
+        if problems:
+            raise PostCheckError(problems)
+    return doc
+
+
+def _build_document(ctx, findings, title):
     return OrderedDict([
         ("is_mock", False), ("schema_version", "draft-0"),
         ("data_release", {"name": "TCGA-BRCA (frozen event release)",
@@ -830,7 +858,7 @@ def audit(ctx, claims, title):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Evidence engine v1.1.2")
+    ap = argparse.ArgumentParser(description="Evidence engine v1.1.3")
     ap.add_argument("--data-dir", default=L.DEFAULT_DIR)
     ap.add_argument("--report", help="text or markdown file with numbered or bulleted claims")
     ap.add_argument("--claim", action="append", default=[], help="a single claim (can repeat)")
@@ -870,7 +898,13 @@ def main(argv=None):
         k, v = item.split("=", 1)
         overrides[k] = v
     ctx = Context(args.data_dir, overrides)
-    doc = audit(ctx, claims, title)
+    try:
+        doc = audit(ctx, claims, title)
+    except PostCheckError as err:
+        print("Refusing to write output: the guardrails post-check found problems.", file=sys.stderr)
+        for problem in err.problems:
+            print("  -", problem, file=sys.stderr)
+        sys.exit(3)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=2)
