@@ -59,14 +59,20 @@ export function plainResult(f) {
 export const isRatio = (f) => String((f.evidence || {}).metric_name || '').startsWith('ratio_');
 export const ratioText = (f) => Number(f.evidence.value).toFixed(2) + ' to 1';
 export const groupsText = (f) => ((f.evidence || {}).groups || []).map((g) => g.group + ' ' + fmtNum(g.n)).join(' vs ');
+// Survival comparisons (metric survival_groups_...) are never judged: their numbers are the deaths in each group.
+export const isSurvivalGroups = (f) => String((f.evidence || {}).metric_name || '').startsWith('survival_groups');
+export const deathsText = (f) => ((f.evidence || {}).breakdown || []).map((g) => g.group + ' ' + plural(g.events, 'death')).join(' vs ');
+const sizesText = (f) => ((f.evidence || {}).breakdown || []).map((g) => g.group + ' ' + plural(g.n, 'sample')).join(' vs ');
 export function headlineText(f) {
   if (!hasNumber(f)) return null;
   const e = f.evidence;
+  if (isSurvivalGroups(f)) return deathsText(f);
   return isRatio(f) ? ratioText(f) : fmtNum(e.n_samples) + ' of ' + fmtNum(e.denominator);
 }
-// The share that goes with the headline ("48.6%"), or the group counts for a ratio.
+// The share that goes with the headline ("48.6%"), the group counts for a ratio, or the group sizes for a survival comparison.
 export function shareText(f) {
   if (!hasNumber(f)) return null;
+  if (isSurvivalGroups(f)) return sizesText(f);
   return isRatio(f) ? groupsText(f) : pct(f.evidence.n_samples, f.evidence.denominator);
 }
 export function valueText(f, v) {

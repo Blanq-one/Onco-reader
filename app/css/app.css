@@ -107,7 +107,7 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
 .claim-row.active .claim-link { box-shadow: 0 0 0 2px var(--accent); }
 .claim-link .text { min-width: 0; }
 .claim-link .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.claim-link .num { text-align: right; font-weight: 700; white-space: nowrap; }
+.claim-link .num { text-align: right; font-weight: 700; max-width: 15em; overflow-wrap: normal; }
 .claim-link .num small { display: block; color: var(--muted); font-weight: 400; }
 .compare-bar { position: sticky; bottom: 0; background: var(--surface); border: 1px solid var(--accent); border-radius: var(--r); padding: var(--s2) var(--s3); margin-top: var(--s3); display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
 
@@ -184,7 +184,7 @@ dl.keys dd { margin: 0; }
   .top-menu .btn { justify-content: center; }
   .crumbs { padding-top: var(--s2); }
   h1 { font-size: 1.4rem; } .hero h1 { font-size: 1.7rem; }
-  .claim-link { grid-template-columns: 1fr; gap: 6px; } .claim-link .num { text-align: left; }
+  .claim-link { grid-template-columns: 1fr; gap: 6px; } .claim-link .num { text-align: left; max-width: none; }
   .headline .big { font-size: 2.4rem; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -294,3 +294,4 @@ html[data-role="engineer"] [data-for]:not([data-for~="engineer"]) { display: non
   .dp-opt { flex: 1 1 100%; }
 }
 @media print { .decision-panel .dp-form { display: none; } }
+.headline-text { font-size: 1.05rem; margin: var(--s2) 0; }

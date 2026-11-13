@@ -1,6 +1,6 @@
 import { h, countUp, copyText, toast, fmtNum, fmtValue, pct, plural } from '../util.js';
 import { state, findings, isBlocked, cannotAnswer, hasNumber, VERDICT, FLAG_TEXT } from '../state.js';
-import { verdictBadge, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText } from '../ui.js';
+import { verdictBadge, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText, isSurvivalGroups, deathsText } from '../ui.js';
 
 const enc = encodeURIComponent;
 
@@ -39,9 +39,11 @@ export function claimPage(f, q) {
     const lowEvents = f.guardrail_flags.includes('low_event_count');
     root.append(h('section', { class: 'card', 'aria-labelledby': 'vh' }, h('h2', { id: 'vh' }, 'Verdict'),
       h('div', { class: 'row' }, verdictBadge(f), flagChips(f)),
-      h('div', { class: 'headline', 'data-for': forRoles('researcher', 'engineer') }, big,
-        isRatio(f) ? [h('span', { class: 'of' }, 'to 1'), h('span', { class: 'p' }, groupsText(f))]
-          : [h('span', { class: 'of' }, 'of ' + fmtNum(e.denominator)), h('span', { class: 'p' }, pct(e.n_samples, e.denominator))]),
+      isSurvivalGroups(f)
+        ? h('p', { class: 'headline-text' }, h('b', {}, 'OS deaths by group: '), deathsText(f) + '. Not judged: a survival difference needs a statistician\'s test.')
+        : h('div', { class: 'headline', 'data-for': forRoles('researcher', 'engineer') }, big,
+          isRatio(f) ? [h('span', { class: 'of' }, 'to 1'), h('span', { class: 'p' }, groupsText(f))]
+            : [h('span', { class: 'of' }, 'of ' + fmtNum(e.denominator)), h('span', { class: 'p' }, pct(e.n_samples, e.denominator))]),
       h('p', { class: 'caption', style: 'margin:4px 0 8px', 'data-for': forRoles('researcher', 'engineer') }, caption(f)),
       h('div', { class: 'muted', 'data-for': forRoles('engineer') }, 'Metric: ', h('span', { class: 'mono' }, e.metric_name || 'unknown'), ' | value ' + valueText(f))));
     if (lowEvents) root.append(h('div', { class: 'notice', role: 'alert', 'data-for': forRoles('datause', 'researcher') }, h('b', {}, '⚠ Low event count. '), 'Too few deaths for a stable comparison. This finding is flagged for review.'));

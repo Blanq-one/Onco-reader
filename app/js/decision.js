@@ -52,13 +52,13 @@ export function analyse() {
   const flaggedOk = g.review.filter((id) => !g.blocked.includes(id)).length;
   if (flaggedOk) research.push('check ' + plural(flaggedOk, 'flagged result'));
   if (research.length) reviewers.push({ role: 'researcher', why: cap(research.join('; ')) + '.' });
-  if (n('blocked')) reviewers.push({ role: 'datause', why: `Confirm the ${plural(n('blocked'), 'claim')} stopped by a safety check stay out of the report.` });
+  if (n('blocked')) reviewers.push({ role: 'datause', why: `Confirm that the ${plural(n('blocked'), 'claim')} stopped by a safety check ${n('blocked') === 1 ? 'stays' : 'stay'} out of the report.` });
   const rel = (state.data && state.data.data_release) || {};
   const unverified = rel.checksum_status && rel.checksum_status !== 'verified';
   if (n('cannot') || unverified) {
     const parts = [];
     if (unverified) parts.push('the data files were not confirmed against their checksums');
-    if (n('cannot')) parts.push(plural(n('cannot'), 'claim') + ' need a field the data does not have');
+    if (n('cannot')) parts.push(plural(n('cannot'), 'claim needs', 'claims need') + ' a field the data does not have');
     reviewers.push({ role: 'engineer', why: cap(parts.join('; ')) + '.' });
   }
   reviewers.push({ role: 'leader', why: 'Approve the next step for the report.' });

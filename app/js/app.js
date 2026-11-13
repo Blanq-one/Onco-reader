@@ -40,6 +40,8 @@ function roleSwitcher() {
     const r = setRole(sel.value);
     document.getElementById('role-help').textContent = ROLES[r].sees;
     toast('Showing the ' + ROLES[r].label.toLowerCase() + ' view: ' + ROLES[r].sees + '.');
+    // On a phone the menu covers the page: close it so the new view shows, and keep focus on the Menu button.
+    if (document.getElementById('topbar').classList.contains('open')) setMenu(false, true);
   });
   return h('div', { class: 'role-switch' }, h('label', { for: 'role-select' }, 'View as'), sel,
     h('span', { id: 'role-help', class: 'sr' }, ROLES[getRole()].sees));
@@ -79,9 +81,10 @@ function banner() {
     'SAMPLE DATA. ' + (d.mock_warning || 'These numbers are invented and are not TCGA-BRCA results.')) : '');
 }
 function foot() {
-  document.getElementById('foot').textContent = state.data
-    ? 'Source: ' + state.source + '. Checks data readiness only. No clinical claims.'
-    : 'Checks data readiness only. No clinical claims.';
+  // A pasted report that is extracted but not yet audited is not the loaded findings: say which is which.
+  const src = state.mode === 'live-extract' ? 'Report: ' + (state.reportTitle || 'your pasted text') + ' (extracted, not audited yet)'
+    : state.data ? 'Source: ' + state.source : '';
+  document.getElementById('foot').textContent = (src ? src + '. ' : '') + 'Checks data readiness only. No clinical claims.';
 }
 
 function route() {
