@@ -1,0 +1,306 @@
+{
+  "is_mock": false,
+  "schema_version": "draft-0",
+  "data_release": {
+    "name": "TCGA-BRCA (frozen event release)",
+    "checksum_verified": true,
+    "checksum_status": "verified"
+  },
+  "report_title": "practice_brief.md",
+  "interpretation_config": {
+    "most_threshold": 0.5,
+    "nearly_all": 0.95,
+    "about_tolerance": 0.03,
+    "about_count_rel": 0.02,
+    "borderline_margin": 0.02,
+    "min_population": 30,
+    "min_events": 20,
+    "min_group_size": 30
+  },
+  "guardrails_source": "src/guardrails",
+  "data_notes": [
+    {
+      "attribute": "ER status",
+      "column_used": "breast_carcinoma_estrogen_receptor_status",
+      "chosen_by": "most recorded values",
+      "primary_tumors_with_recorded_value": 1048,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "ER_Status_nature2012",
+          "primary_tumors_with_recorded_value": 782
+        }
+      ]
+    },
+    {
+      "attribute": "PR status",
+      "column_used": "breast_carcinoma_progesterone_receptor_status",
+      "chosen_by": "most recorded values",
+      "primary_tumors_with_recorded_value": 1047,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "PR_Status_nature2012",
+          "primary_tumors_with_recorded_value": 781
+        }
+      ]
+    },
+    {
+      "attribute": "HER2 status",
+      "column_used": "lab_proc_her2_neu_immunohistochemistry_receptor_status",
+      "chosen_by": "most recorded values",
+      "primary_tumors_with_recorded_value": 919,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "HER2_Final_Status_nature2012",
+          "primary_tumors_with_recorded_value": 776
+        }
+      ]
+    },
+    {
+      "attribute": "pathologic stage",
+      "column_used": "pathologic_stage",
+      "chosen_by": "most recorded values",
+      "primary_tumors_with_recorded_value": 1075,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "AJCC_Stage_nature2012",
+          "primary_tumors_with_recorded_value": 769
+        }
+      ]
+    },
+    {
+      "attribute": "histological type",
+      "column_used": "histological_type",
+      "chosen_by": "most recorded values",
+      "primary_tumors_with_recorded_value": 1096,
+      "primary_tumors": 1101,
+      "alternatives": []
+    },
+    {
+      "attribute": "PAM50 subtype",
+      "column_used": "PAM50Call_RNAseq",
+      "chosen_by": "most recorded values",
+      "primary_tumors_with_recorded_value": 844,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "PAM50_mRNA_nature2012",
+          "primary_tumors_with_recorded_value": 522
+        },
+        {
+          "column": "Integrated_Clusters_with_PAM50__nature2012",
+          "primary_tumors_with_recorded_value": 348
+        }
+      ]
+    },
+    {
+      "attribute": "gender",
+      "column_used": "gender",
+      "chosen_by": "most recorded values",
+      "primary_tumors_with_recorded_value": 1097,
+      "primary_tumors": 1101,
+      "alternatives": []
+    }
+  ],
+  "findings": [
+    {
+      "id": "claim-001",
+      "claim_text": "Of the 1,101 primary tumors in the release, 535 have survival, mutation, copy number, RNA and protein data.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "count_has_survival_has_mutation_has_copy_number_has_rna_has_protein",
+        "value": 535,
+        "n_samples": 535,
+        "denominator": 1101,
+        "source_files": [
+          "survival.tsv",
+          "mutation_gene_level.tsv.gz",
+          "copy_number_gistic.tsv.gz",
+          "rna_hiseq.tsv.gz",
+          "protein_rppa.tsv.gz",
+          "sample_manifest.csv"
+        ],
+        "calculation": "primary tumor samples: 1101. Claim read as: 'exactly 1101' tumors. | samples with survival and mutation and copy number and RNA and protein among primary tumor samples: 535 / 1101 = 48.6%. OS deaths among these 535 samples: 76. Claim read as: 'exactly 535' tumors.",
+        "sub_checks": [
+          {
+            "claim": "There are 1,101 primary tumors.",
+            "verdict": "supported",
+            "value": 1101,
+            "n_samples": 1101,
+            "denominator": 1101
+          },
+          {
+            "claim": "535 primary tumors have survival, mutation, copy number, RNA and protein data.",
+            "verdict": "supported",
+            "value": 535,
+            "n_samples": 535,
+            "denominator": 1101
+          }
+        ]
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has survival",
+          "n_before": 1101,
+          "n_after": 1097
+        },
+        {
+          "step": "has mutation",
+          "n_before": 1097,
+          "n_after": 791
+        },
+        {
+          "step": "has copy number",
+          "n_before": 791,
+          "n_after": 785
+        },
+        {
+          "step": "has RNA",
+          "n_before": 785,
+          "n_after": 783
+        },
+        {
+          "step": "has protein",
+          "n_before": 783,
+          "n_after": 535
+        }
+      ],
+      "limitation": "Counts come from the release's sample list: one sample is one barcode, and one patient can have several samples. Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. Survival presence says nothing about follow-up length; events are overall-survival deaths.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "State which sample types the count covers (primary tumor, normal tissue, metastasis) so readers can reproduce it.",
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": null,
+      "correct_value": null,
+      "missing_evidence": null,
+      "source_sentence": "Of the 1,101 primary tumors in the release, 535 have survival, mutation, copy number, RNA and protein data."
+    },
+    {
+      "id": "claim-002",
+      "claim_text": "Luminal A is the largest RNA subtype, accounting for about 62% of primary tumors with an RNA subtype call.",
+      "verdict": "contradicted",
+      "evidence": {
+        "metric_name": "share_luminal_a",
+        "value": 0.4988,
+        "n_samples": 421,
+        "denominator": 844,
+        "source_files": [
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "Groups of PAM50 subtype among primary tumor samples with it recorded (844 of 1101): Luminal A 421; Luminal B 192; Basal-like 141; HER2-enriched 67; Normal-like 23. The largest group is Luminal A (421 of 844). Claim: Luminal A is the largest. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)). | Luminal A among primary tumor samples with PAM50 subtype recorded: 421 / 844 = 49.9%. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)). Claim read as: 'about 62 percent' (within 3 points).",
+        "sub_checks": [
+          {
+            "claim": "Luminal A is the largest RNA subtype.",
+            "verdict": "supported",
+            "value": 421,
+            "n_samples": 421,
+            "denominator": 844
+          },
+          {
+            "claim": "Luminal A accounts for about 62% of primary tumors with an RNA subtype call.",
+            "verdict": "contradicted",
+            "value": 0.4988,
+            "n_samples": 421,
+            "denominator": 844
+          }
+        ]
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has PAM50 subtype recorded",
+          "n_before": 1101,
+          "n_after": 844
+        },
+        {
+          "step": "Luminal A",
+          "n_before": 844,
+          "n_after": 421
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the field, not just counts, before relying on the ranking.",
+        "Restrict the question to the 421 samples that match, or choose a layer or field with better coverage.",
+        "Restate the claim with the measured figure (421 of 844)."
+      ],
+      "robustness": {
+        "alt_rule": "count samples with no recorded value in the denominator too",
+        "alt_value": 0.3824,
+        "verdict_changes": false
+      },
+      "correct_value": {
+        "value": 49.9,
+        "unit": "percent",
+        "text": "49.9% (421 of 844)"
+      },
+      "missing_evidence": null,
+      "source_sentence": "Luminal A is the largest RNA subtype, accounting for about 62% of primary tumors with an RNA subtype call."
+    },
+    {
+      "id": "claim-003",
+      "claim_text": "Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy.",
+      "verdict": "insufficient_evidence",
+      "evidence": {
+        "metric_name": "not_computed",
+        "value": null,
+        "n_samples": 0,
+        "denominator": 1101,
+        "source_files": [],
+        "calculation": "not run: Blocked: this reads as a treatment response claim, and this tool checks data readiness only."
+      },
+      "cohort_trace": [],
+      "limitation": "This tool checks data readiness only. The request was stopped before any analysis.",
+      "needs_human_review": true,
+      "review_reason": "Blocked: this reads as a treatment response claim, and this tool checks data readiness only.",
+      "guardrail_flags": [
+        "clinical_claim_blocked"
+      ],
+      "next_actions": [
+        "Rewrite the claim as a data-availability question, such as how many samples have treatment records.",
+        "Send treatment-effect questions to qualified clinical researchers."
+      ],
+      "robustness": null,
+      "correct_value": null,
+      "missing_evidence": "Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, survival times, and molecular layers, but no treatment or response data.",
+      "source_sentence": "Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy, which suggests protein data could guide treatment research."
+    }
+  ],
+  "skipped_sentences": [
+    {
+      "text": "*A short fictional research summary written by the organizers for practice. It describes the TCGA-BRCA files in this repository (release A from `fetch.py`).*",
+      "reason": "an italic note, not a claim"
+    },
+    {
+      "text": "TCGA's breast cancer cohort is one of the most widely used public cancer datasets.",
+      "reason": "no checkable number or data statement"
+    },
+    {
+      "text": "Protein measurements add a useful layer.",
+      "reason": "no checkable number or data statement"
+    },
+    {
+      "text": "We recommend future work combine all available layers.",
+      "reason": "a recommendation, not a factual claim"
+    }
+  ]
+}

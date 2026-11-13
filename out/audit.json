@@ -1,0 +1,220 @@
+{
+  "format_version": "0.2",
+  "producer": {
+    "team": "onco-evidence",
+    "product": "Research Claim Auditor",
+    "track": "evidence-navigator"
+  },
+  "data": {
+    "dataset": "TCGA-BRCA",
+    "releases": [
+      {
+        "name": "raw",
+        "files": [
+          {
+            "file": "clinical.tsv",
+            "sha256": "39eb3be0fb86e6a577bd2cc01502a7fa5a271e1e1cba294e9dc644ad99580d7f"
+          },
+          {
+            "file": "survival.tsv",
+            "sha256": "6c9e18ae9c2b8bacc48cd5a60cde97e8880ae2e84e48df437a0378b17e659b73"
+          },
+          {
+            "file": "mutation_gene_level.tsv.gz",
+            "sha256": "ceaf6a01fd983cefc7fca8b52f6c65121acc87b75f4d170b9fcdc07ee16a3813"
+          },
+          {
+            "file": "protein_rppa.tsv.gz",
+            "sha256": "7823a7a375495f7e5f114d0c7ec8773e070cb9ac409785f98045d12ab71195e6"
+          },
+          {
+            "file": "copy_number_gistic.tsv.gz",
+            "sha256": "c45b1f8ea19c8dc20bd614d0863a40cccc633518d0ad05d2c7fff5f75781e980"
+          },
+          {
+            "file": "rna_hiseq.tsv.gz",
+            "sha256": "263bf67245cc4b9062676583c0ff0306f08471a26aafd5504037e1da22133746"
+          }
+        ]
+      }
+    ]
+  },
+  "question": "Which claims in practice_brief.md does the TCGA-BRCA release 'raw' support, contradict, or leave without enough evidence?",
+  "findings": [
+    {
+      "id": "claim-001",
+      "kind": "claim_check",
+      "claim_text": "Of the 1,101 primary tumors in the release, 535 have survival, mutation, copy number, RNA and protein data.",
+      "claim_verdict": "supported",
+      "summary": "Supported. The data shows 535 of 1101. Parts of the sentence supported: 2 of 2.",
+      "severity": "none",
+      "confidence": "high",
+      "needs_human_review": false,
+      "limitation": "Counts come from the release's sample list: one sample is one barcode, and one patient can have several samples. Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. Survival presence says nothing about follow-up length; events are overall-survival deaths.",
+      "evidence": [
+        {
+          "kind": "claim",
+          "id": "claim-001",
+          "note": "The claim as written in the report."
+        },
+        {
+          "kind": "claim",
+          "id": "claim-001.1",
+          "note": "Part 1: There are 1,101 primary tumors. Verdict: supported; measured 1101."
+        },
+        {
+          "kind": "claim",
+          "id": "claim-001.2",
+          "note": "Part 2: 535 primary tumors have survival, mutation, copy number, RNA and protein data. Verdict: supported; measured 535 of 1101."
+        },
+        {
+          "kind": "analysis",
+          "id": "count_has_survival_has_mutation_has_copy_number_has_rna_has_protein",
+          "release": "raw",
+          "note": "count_has_survival_has_mutation_has_copy_number_has_rna_has_protein = 535 (535 of 1101 samples). primary tumor samples: 1101. Claim read as: 'exactly 1101' tumors. | samples with survival and mutation and copy number and RNA and protein among primary tumor samples: 535 / 1101 = 48.6%. OS deaths among these 535 samples: 76. Claim read as: 'exactly 535' tumors."
+        },
+        {
+          "kind": "analysis",
+          "id": "cohort_trace",
+          "release": "raw",
+          "note": "Cohort, step by step: primary tumor samples: 1101; has survival: 1101 -> 1097; has mutation: 1097 -> 791; has copy number: 791 -> 785; has RNA: 785 -> 783; has protein: 783 -> 535."
+        },
+        {
+          "kind": "file",
+          "id": "survival.tsv",
+          "release": "raw",
+          "file": "survival.tsv"
+        },
+        {
+          "kind": "file",
+          "id": "mutation_gene_level.tsv.gz",
+          "release": "raw",
+          "file": "mutation_gene_level.tsv.gz"
+        },
+        {
+          "kind": "file",
+          "id": "copy_number_gistic.tsv.gz",
+          "release": "raw",
+          "file": "copy_number_gistic.tsv.gz"
+        },
+        {
+          "kind": "file",
+          "id": "rna_hiseq.tsv.gz",
+          "release": "raw",
+          "file": "rna_hiseq.tsv.gz"
+        },
+        {
+          "kind": "file",
+          "id": "protein_rppa.tsv.gz",
+          "release": "raw",
+          "file": "protein_rppa.tsv.gz"
+        },
+        {
+          "kind": "file",
+          "id": "sample_manifest.csv",
+          "release": "raw",
+          "file": "sample_manifest.csv",
+          "note": "not listed in sources.csv"
+        }
+      ]
+    },
+    {
+      "id": "claim-002",
+      "kind": "claim_check",
+      "claim_text": "Luminal A is the largest RNA subtype, accounting for about 62% of primary tumors with an RNA subtype call.",
+      "claim_verdict": "contradicted",
+      "correct_value": "49.9% (421 of 844)",
+      "summary": "Contradicted. The data shows 49.9% (421 of 844). Parts of the sentence supported: 1 of 2.",
+      "severity": "high",
+      "confidence": "high",
+      "needs_human_review": false,
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Where several columns hold the same field, the one with the most recorded values is used unless overridden, which favors completeness over how definitive the measurement is.",
+      "evidence": [
+        {
+          "kind": "claim",
+          "id": "claim-002",
+          "note": "The claim as written in the report."
+        },
+        {
+          "kind": "claim",
+          "id": "claim-002.1",
+          "note": "Part 1: Luminal A is the largest RNA subtype. Verdict: supported; measured 421 of 844."
+        },
+        {
+          "kind": "claim",
+          "id": "claim-002.2",
+          "note": "Part 2: Luminal A accounts for about 62% of primary tumors with an RNA subtype call. Verdict: contradicted; measured 49.9% (421 of 844)."
+        },
+        {
+          "kind": "analysis",
+          "id": "share_luminal_a",
+          "release": "raw",
+          "note": "share_luminal_a = 0.4988 (421 of 844 samples). Groups of PAM50 subtype among primary tumor samples with it recorded (844 of 1101): Luminal A 421; Luminal B 192; Basal-like 141; HER2-enriched 67; Normal-like 23. The largest group is Luminal A (421 of 844). Claim: Luminal A is the largest. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)). | Luminal A among primary tumor samples with PAM50 subtype recorded: 421 / 844 = 49.9%. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)). Claim read as: 'about 62 percent' (within 3 points)."
+        },
+        {
+          "kind": "analysis",
+          "id": "cohort_trace",
+          "release": "raw",
+          "note": "Cohort, step by step: primary tumor samples: 1101; has PAM50 subtype recorded: 1101 -> 844; Luminal A: 844 -> 421."
+        },
+        {
+          "kind": "analysis",
+          "id": "robustness",
+          "release": "raw",
+          "note": "Alternative reading (count samples with no recorded value in the denominator too): value 0.3824; verdict does not change."
+        },
+        {
+          "kind": "file",
+          "id": "clinical.tsv",
+          "release": "raw",
+          "file": "clinical.tsv"
+        },
+        {
+          "kind": "file",
+          "id": "sample_manifest.csv",
+          "release": "raw",
+          "file": "sample_manifest.csv",
+          "note": "not listed in sources.csv"
+        }
+      ]
+    },
+    {
+      "id": "claim-003",
+      "kind": "claim_check",
+      "claim_text": "Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy, which suggests protein data could guide treatment research.",
+      "claim_verdict": "insufficient_evidence",
+      "summary": "Insufficient evidence. Blocked: this reads as a treatment response claim, and this tool checks data readiness only. Data needed: Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, survival times, and molecular layers, but no treatment or response data.",
+      "severity": "medium",
+      "confidence": "medium",
+      "needs_human_review": true,
+      "limitation": "This tool checks data readiness only. The request was stopped before any analysis.",
+      "evidence": [
+        {
+          "kind": "claim",
+          "id": "claim-003",
+          "note": "Checked as: Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy."
+        },
+        {
+          "kind": "analysis",
+          "id": "not_computed",
+          "note": "not run: Blocked: this reads as a treatment response claim, and this tool checks data readiness only."
+        },
+        {
+          "kind": "release",
+          "id": "raw",
+          "note": "Data needed, not found in this release: Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, survival times, and molecular layers, but no treatment or response data."
+        },
+        {
+          "kind": "analysis",
+          "id": "guardrail_check",
+          "note": "Guardrail flags: clinical_claim_blocked."
+        },
+        {
+          "kind": "analysis",
+          "id": "human_review",
+          "note": "A person must check this before it is used: Blocked: this reads as a treatment response claim, and this tool checks data readiness only."
+        }
+      ]
+    }
+  ]
+}
