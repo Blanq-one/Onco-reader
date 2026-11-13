@@ -1,0 +1,740 @@
+{
+  "is_mock": false,
+  "schema_version": "draft-0",
+  "data_release": {
+    "name": "TCGA-BRCA (frozen event release)",
+    "checksum_verified": true,
+    "checksum_status": "verified"
+  },
+  "report_title": "sample_claims_v11.md",
+  "interpretation_config": {
+    "most_threshold": 0.5,
+    "nearly_all": 0.95,
+    "about_tolerance": 0.05,
+    "borderline_margin": 0.02,
+    "min_population": 30,
+    "min_events": 20,
+    "min_group_size": 30
+  },
+  "guardrails_source": "built-in fallback (temporary, replace with D's module)",
+  "data_notes": [
+    {
+      "attribute": "ER status",
+      "column_used": "breast_carcinoma_estrogen_receptor_status",
+      "primary_tumors_with_recorded_value": 1048,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "ER_Status_nature2012",
+          "primary_tumors_with_recorded_value": 782
+        }
+      ]
+    },
+    {
+      "attribute": "PR status",
+      "column_used": "breast_carcinoma_progesterone_receptor_status",
+      "primary_tumors_with_recorded_value": 1047,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "PR_Status_nature2012",
+          "primary_tumors_with_recorded_value": 781
+        }
+      ]
+    },
+    {
+      "attribute": "HER2 status",
+      "column_used": "lab_proc_her2_neu_immunohistochemistry_receptor_status",
+      "primary_tumors_with_recorded_value": 919,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "HER2_Final_Status_nature2012",
+          "primary_tumors_with_recorded_value": 776
+        }
+      ]
+    },
+    {
+      "attribute": "pathologic stage",
+      "column_used": "pathologic_stage",
+      "primary_tumors_with_recorded_value": 1075,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "AJCC_Stage_nature2012",
+          "primary_tumors_with_recorded_value": 769
+        }
+      ]
+    },
+    {
+      "attribute": "histological type",
+      "column_used": "histological_type",
+      "primary_tumors_with_recorded_value": 1096,
+      "primary_tumors": 1101,
+      "alternatives": []
+    },
+    {
+      "attribute": "PAM50 subtype",
+      "column_used": "PAM50Call_RNAseq",
+      "primary_tumors_with_recorded_value": 844,
+      "primary_tumors": 1101,
+      "alternatives": [
+        {
+          "column": "PAM50_mRNA_nature2012",
+          "primary_tumors_with_recorded_value": 522
+        },
+        {
+          "column": "Integrated_Clusters_with_PAM50__nature2012",
+          "primary_tumors_with_recorded_value": 348
+        }
+      ]
+    },
+    {
+      "attribute": "gender",
+      "column_used": "gender",
+      "primary_tumors_with_recorded_value": 1097,
+      "primary_tumors": 1101,
+      "alternatives": []
+    }
+  ],
+  "findings": [
+    {
+      "id": "claim-001",
+      "claim_text": "ER status is recorded for most samples.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "coverage_has_er_status_recorded",
+        "value": 0.9519,
+        "n_samples": 1048,
+        "denominator": 1101,
+        "source_files": [
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "samples with ER status recorded among primary tumor samples: 1048 / 1101 = 95.2%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). Claim read as: 'most' means more than 50 percent."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has ER status recorded",
+          "n_before": 1101,
+          "n_after": 1048
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 0.9471,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-002",
+      "claim_text": "At least 100 ER-positive tumors are available.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "count_er_positive",
+        "value": 808,
+        "n_samples": 808,
+        "denominator": 1048,
+        "source_files": [
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "ER-positive among primary tumor samples with ER status recorded: 808 / 1048 = 77.1%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). Claim read as: 'at least 100' tumors."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has ER status recorded",
+          "n_before": 1101,
+          "n_after": 1048
+        },
+        {
+          "step": "ER-positive",
+          "n_before": 1048,
+          "n_after": 808
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 912,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-003",
+      "claim_text": "About 15 percent of tumors are HER2-positive.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "share_her2_positive",
+        "value": 0.1785,
+        "n_samples": 164,
+        "denominator": 919,
+        "source_files": [
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "HER2-positive among primary tumor samples with HER2 status recorded: 164 / 919 = 17.8%. HER2 status read from lab_proc_her2_neu_immunohistochemistry_receptor_status (recorded for 919 of 1101 primary tumors; alternatives: HER2_Final_Status_nature2012 (776)). Claim read as: 'about 15 percent' (within 5 points)."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has HER2 status recorded",
+          "n_before": 1101,
+          "n_after": 919
+        },
+        {
+          "step": "HER2-positive",
+          "n_before": 919,
+          "n_after": 164
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count samples with no recorded value in the denominator too",
+        "alt_value": 0.149,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-004",
+      "claim_text": "RNA data is available for most HER2-positive tumors.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "coverage_has_rna",
+        "value": 1.0,
+        "n_samples": 164,
+        "denominator": 164,
+        "source_files": [
+          "rna_hiseq.tsv.gz",
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "samples with RNA among primary tumor samples that are/have HER2-positive: 164 / 164 = 100.0%. HER2 status read from lab_proc_her2_neu_immunohistochemistry_receptor_status (recorded for 919 of 1101 primary tumors; alternatives: HER2_Final_Status_nature2012 (776)). Claim read as: 'most' means more than 50 percent."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "HER2-positive",
+          "n_before": 1101,
+          "n_after": 164
+        },
+        {
+          "step": "has RNA",
+          "n_before": 164,
+          "n_after": 164
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 1.0,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-005",
+      "claim_text": "Protein data covers nearly all triple-negative tumors.",
+      "verdict": "contradicted",
+      "evidence": {
+        "metric_name": "coverage_has_protein",
+        "value": 0.7069,
+        "n_samples": 82,
+        "denominator": 116,
+        "source_files": [
+          "protein_rppa.tsv.gz",
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "samples with protein among primary tumor samples that are/have ER-negative and PR-negative and HER2-negative: 82 / 116 = 70.7%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)); PR status read from breast_carcinoma_progesterone_receptor_status (recorded for 1047 of 1101 primary tumors; alternatives: PR_Status_nature2012 (781)); HER2 status read from lab_proc_her2_neu_immunohistochemistry_receptor_status (recorded for 919 of 1101 primary tumors; alternatives: HER2_Final_Status_nature2012 (776)). Claim read as: 'nearly all' means at least 95 percent."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "ER-negative",
+          "n_before": 1101,
+          "n_after": 238
+        },
+        {
+          "step": "PR-negative",
+          "n_before": 238,
+          "n_after": 220
+        },
+        {
+          "step": "HER2-negative",
+          "n_before": 220,
+          "n_after": 116
+        },
+        {
+          "step": "has protein",
+          "n_before": 116,
+          "n_after": 82
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Restrict the question to the 82 samples that match, or choose a layer or field with better coverage.",
+        "Restate the claim with the measured figure (82 of 116)."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 0.6385,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-006",
+      "claim_text": "Fewer than 30 stage IV samples exist.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "count_stage_iv",
+        "value": 20,
+        "n_samples": 20,
+        "denominator": 1075,
+        "source_files": [
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "stage IV among primary tumor samples with pathologic stage recorded: 20 / 1075 = 1.9%. pathologic stage read from pathologic_stage (recorded for 1075 of 1101 primary tumors; alternatives: AJCC_Stage_nature2012 (769)). Claim read as: 'fewer than 30' samples."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has pathologic stage recorded",
+          "n_before": 1101,
+          "n_after": 1075
+        },
+        {
+          "step": "stage IV",
+          "n_before": 1075,
+          "n_after": 20
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 22,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-007",
+      "claim_text": "Survival data is available for most stage II tumors.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "coverage_has_survival",
+        "value": 1.0,
+        "n_samples": 622,
+        "denominator": 622,
+        "source_files": [
+          "survival.tsv",
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "samples with survival among primary tumor samples that are/have stage II: 622 / 622 = 100.0%. pathologic stage read from pathologic_stage (recorded for 1075 of 1101 primary tumors; alternatives: AJCC_Stage_nature2012 (769)). OS deaths among these 622 samples: 66. Claim read as: 'most' means more than 50 percent."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "stage II",
+          "n_before": 1101,
+          "n_after": 622
+        },
+        {
+          "step": "has survival",
+          "n_before": 622,
+          "n_after": 622
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Survival presence says nothing about follow-up length; events are overall-survival deaths.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 0.993,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-008",
+      "claim_text": "At least 30 deaths among ER-negative tumors.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "count_died_os_event",
+        "value": 41,
+        "n_samples": 41,
+        "denominator": 238,
+        "source_files": [
+          "clinical.tsv",
+          "survival.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "samples with deaths among primary tumor samples that are/have ER-negative and has survival: 41 / 238 = 17.2%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). OS deaths among these 41 samples: 41. Claim read as: 'at least 30' deaths."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "ER-negative",
+          "n_before": 1101,
+          "n_after": 238
+        },
+        {
+          "step": "has survival",
+          "n_before": 238,
+          "n_after": 238
+        },
+        {
+          "step": "died (OS event)",
+          "n_before": 238,
+          "n_after": 41
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified. Survival presence says nothing about follow-up length; events are overall-survival deaths.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 51,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-009",
+      "claim_text": "The cohort is large enough for a subtype comparison.",
+      "verdict": "insufficient_evidence",
+      "evidence": {
+        "metric_name": "group_sizes_subtype",
+        "value": 23,
+        "n_samples": 844,
+        "denominator": 1101,
+        "source_files": [
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "PAM50 subtype among primary tumor samples: recorded for 844 of 1101. Groups (samples, OS deaths): luma 421 (55 deaths); lumb 192 (32 deaths); basal 141 (19 deaths); her2 67 (14 deaths); normal 23 (5 deaths). Smallest group: normal with 23 samples and 5 deaths. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)).",
+        "breakdown": [
+          {
+            "group": "luma",
+            "n": 421,
+            "events": 55
+          },
+          {
+            "group": "lumb",
+            "n": 192,
+            "events": 32
+          },
+          {
+            "group": "basal",
+            "n": 141,
+            "events": 19
+          },
+          {
+            "group": "her2",
+            "n": 67,
+            "events": 14
+          },
+          {
+            "group": "normal",
+            "n": 23,
+            "events": 5
+          }
+        ]
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has PAM50 subtype recorded",
+          "n_before": 1101,
+          "n_after": 844
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": true,
+      "review_reason": "The claim has no measurable threshold; a person must decide what counts as large enough. The smallest group has only 23 samples. 3 group(s) have fewer than 20 deaths, which is thin for survival comparisons.",
+      "guardrail_flags": [
+        "low_event_count"
+      ],
+      "next_actions": [
+        "State the minimum group size (and deaths) the comparison needs, then re-run.",
+        "Merge or drop the smallest group (normal, 23 samples) if the comparison needs balanced groups.",
+        "Check why 257 of 1101 samples have no recorded PAM50 subtype."
+      ],
+      "robustness": null
+    },
+    {
+      "id": "claim-010",
+      "claim_text": "Every tumor sample has a matching pathology slide.",
+      "verdict": "contradicted",
+      "evidence": {
+        "metric_name": "coverage_has_pathology_slides",
+        "value": 0.9973,
+        "n_samples": 1098,
+        "denominator": 1101,
+        "source_files": [
+          "sample_manifest.csv (slides_for_sample)",
+          "sample_manifest.csv"
+        ],
+        "calculation": "samples with pathology slides among primary tumor samples: 1098 / 1101 = 99.7%. Claim read as: 'all/every' means 100 percent. 3 of 1101 samples fall short of 'all'."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has pathology slides",
+          "n_before": 1101,
+          "n_after": 1098
+        }
+      ],
+      "limitation": "A slide counts only when its barcode matches the sample; diagnostic and frozen slides are not separated here.",
+      "needs_human_review": true,
+      "review_reason": "The result sits 0.3 points below the bar of 100%.",
+      "guardrail_flags": [],
+      "next_actions": [
+        "Restrict the question to the 1098 samples that match, or choose a layer or field with better coverage.",
+        "Restate the claim with the measured figure (1098 of 1101)."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 0.9968,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-011",
+      "claim_text": "Luminal A tumors number at least 200.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "count_luminal_a",
+        "value": 421,
+        "n_samples": 421,
+        "denominator": 844,
+        "source_files": [
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "Luminal A among primary tumor samples with PAM50 subtype recorded: 421 / 844 = 49.9%. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)). Claim read as: 'at least 200' samples."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has PAM50 subtype recorded",
+          "n_before": 1101,
+          "n_after": 844
+        },
+        {
+          "step": "Luminal A",
+          "n_before": 844,
+          "n_after": 421
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 434,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-012",
+      "claim_text": "Lobular tumors make up more than 10 percent of the cohort.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "share_lobular",
+        "value": 0.1852,
+        "n_samples": 203,
+        "denominator": 1096,
+        "source_files": [
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "lobular among primary tumor samples with histological type recorded: 203 / 1096 = 18.5%. histological type read from histological_type (recorded for 1096 of 1101 primary tumors). Claim read as: 'more than 10 percent'."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has histological type recorded",
+          "n_before": 1101,
+          "n_after": 1096
+        },
+        {
+          "step": "lobular",
+          "n_before": 1096,
+          "n_after": 203
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count samples with no recorded value in the denominator too",
+        "alt_value": 0.1844,
+        "verdict_changes": false
+      }
+    },
+    {
+      "id": "claim-013",
+      "claim_text": "The data records smoking history for most patients.",
+      "verdict": "insufficient_evidence",
+      "evidence": {
+        "metric_name": "not_computed",
+        "value": null,
+        "n_samples": 0,
+        "denominator": 1101,
+        "source_files": [],
+        "calculation": "not run: it needs a field that is not among the loaded layers or clinical attributes"
+      },
+      "cohort_trace": [],
+      "limitation": "The data cannot answer this: it needs a field that is not among the loaded layers or clinical attributes.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [
+        "data_cannot_answer"
+      ],
+      "next_actions": [
+        "Rephrase the claim around the available layers (clinical, survival, mutation, copy number, RNA, protein, slides) or clinical fields (ER, PR, HER2, stage, histology, PAM50 subtype, gender).",
+        "Check whether the needed field exists in another data file."
+      ],
+      "robustness": null
+    },
+    {
+      "id": "claim-014",
+      "claim_text": "Stage information is available for more than 90 percent of the cohort.",
+      "verdict": "supported",
+      "evidence": {
+        "metric_name": "coverage_has_pathologic_stage_recorded",
+        "value": 0.9764,
+        "n_samples": 1075,
+        "denominator": 1101,
+        "source_files": [
+          "clinical.tsv",
+          "sample_manifest.csv"
+        ],
+        "calculation": "samples with pathologic stage recorded among primary tumor samples: 1075 / 1101 = 97.6%. pathologic stage read from pathologic_stage (recorded for 1075 of 1101 primary tumors; alternatives: AJCC_Stage_nature2012 (769)). Claim read as: 'more than 90 percent'."
+      },
+      "cohort_trace": [
+        {
+          "step": "primary tumor samples",
+          "n_before": 1101,
+          "n_after": 1101
+        },
+        {
+          "step": "has pathologic stage recorded",
+          "n_before": 1101,
+          "n_after": 1075
+        }
+      ],
+      "limitation": "Presence in a file means the sample appears there; it says nothing about data quality or completeness inside the file. A clinical field counts as recorded when it holds a value (not blank or 'not available'); the values themselves were not verified.",
+      "needs_human_review": false,
+      "review_reason": null,
+      "guardrail_flags": [],
+      "next_actions": [
+        "Check data quality inside the file, not just presence, before relying on it."
+      ],
+      "robustness": {
+        "alt_rule": "count every sample type (tumor, normal, metastasis) instead of primary tumors only",
+        "alt_value": 0.9775,
+        "verdict_changes": false
+      }
+    }
+  ]
+}
