@@ -15,7 +15,9 @@
     "borderline_margin": 0.02,
     "min_population": 30,
     "min_events": 20,
-    "min_group_size": 30
+    "min_group_size": 30,
+    "ratio_tolerance": 0.15,
+    "review_band": 1.5
   },
   "guardrails_source": "src/guardrails",
   "data_notes": [
@@ -543,7 +545,7 @@
       ],
       "robustness": null,
       "correct_value": null,
-      "missing_evidence": "Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, survival times, and molecular layers, but no treatment or response data.",
+      "missing_evidence": "Treatment-response records. clinical.tsv has yes/no treatment flags (radiation_therapy, targeted_molecular_therapy, additional_pharmaceutical_therapy) but no hormone-therapy records and no treatment response, so who responded to a treatment cannot be checked.",
       "source_sentence": "Drug X improves survival for patients in this dataset."
     },
     {

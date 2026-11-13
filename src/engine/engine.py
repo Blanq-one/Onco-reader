@@ -1,4 +1,4 @@
-r"""Evidence engine v1.2.1: turn report claims into checked findings (standard library only).
+r"""Evidence engine v1.3.0: turn report claims into checked findings (standard library only).
 
 Plain English: for each claim in a report it (1) runs the guardrail pre-check,
 (2) reads the claim as a small template, (3) computes the real numbers from the
@@ -15,6 +15,22 @@ Templates it understands:
   subgroup coverage "Protein data covers most triple-negative tumors"
   events            "At least 30 deaths among ER-negative tumors"
   readiness         "The cohort is large enough for a subtype comparison" (shows group sizes)
+  largest group     "Luminal A is the largest RNA subtype"
+  population size   "There are 1,247 samples from 1,101 patients"
+New in v1.3.0:
+  sample types      "There are 7 metastatic and 139 normal-tissue samples" (sample_manifest.csv sample_type)
+  slide counts      "There are 1,133 diagnostic slides" / "1,978 frozen sections" (slide_manifest.csv slide_kind)
+  several counts    a sentence with several counts gets one check per count, combined into one finding
+  ranges            "between 40% and 50%", "from 500 to 600 samples" (both ends included)
+  word fractions    "about a third", "one in ten", "half"
+  gene mutations    "TP53 is mutated in about a third of tumors", "PIK3CA is the most frequently mutated gene",
+                    "GATA3 mutations occur in more than 10% of tumors" (mutation_gene_level.tsv.gz; denominator:
+                    primary tumors with mutation data; a gene the file lacks is data_cannot_answer)
+  ratios            "outnumber by about two to one", "twice as many", "roughly 3:1" (within 15 percent)
+  survival claims   "ER-positive patients live longer than ER-negative patients": never skipped, never judged;
+                    shows each group's samples and deaths (wordings the guardrails block stay blocked)
+  review band       an 'about' result close to the edge of its tolerance (within 1.5 times it) goes to a person
+  release folders   data files in raw/ or directly in the folder; no sources.csv means checksum status "unknown"
 Layers: clinical, survival, mutation, copy number, RNA, protein, slides.
 Clinical attributes: ER, PR, HER2, stage, histology, PAM50 subtype, gender.
 Anything else is answered honestly as "insufficient evidence".
@@ -82,6 +98,8 @@ CFG = {
     "min_population": 30,        # fewer samples than this is too thin to judge
     "min_events": 20,            # fewer OS events than this is too thin for survival comparisons
     "min_group_size": 30,        # smaller groups are flagged as thin
+    "ratio_tolerance": 0.15,     # "about two to one" means within 15 percent of 2 (1.7 to 2.3)
+    "review_band": 1.5,          # an 'about' result between tolerance/1.5 and 1.5 x tolerance from the claim goes to a person
 }
 
 LAYER_WORDS = OrderedDict([
@@ -207,7 +225,7 @@ class Context:
 
     # survival events (OS) keyed by sample id
     def _load_os(self):
-        path = os.path.join(self.data_dir, "raw", "survival.tsv")
+        path = os.path.join(L.raw_dir(self.data_dir), "survival.tsv")
         out = {}
         if not os.path.exists(path):
             return out
@@ -227,7 +245,7 @@ class Context:
 
     # clinical attributes: pick the best-populated candidate column for each
     def _load_attributes(self):
-        path = os.path.join(self.data_dir, "raw", "clinical.tsv")
+        path = os.path.join(L.raw_dir(self.data_dir), "clinical.tsv")
         attrs, notes = {}, []
         if not os.path.exists(path):
             return attrs, notes
@@ -235,8 +253,10 @@ class Context:
             reader = csv.DictReader(fh, delimiter="\t")
             header = reader.fieldnames or []
             self.clinical_header = list(header)
+            if not header:  # an empty clinical file: no attributes, never a crash
+                return attrs, notes
             idcol = "sampleID" if "sampleID" in header else header[0]
-            rows = {r[idcol].strip()[:15]: r for r in reader}
+            rows = {(r.get(idcol) or "").strip()[:15]: r for r in reader if (r.get(idcol) or "").strip()}
         primary = [s for s in rows if L.is_primary(s)]
         for key, spec in ATTR_SPECS.items():
             cands = [c for c in spec["candidates"] if c in header]
@@ -343,6 +363,8 @@ def is_checkable(sentence):
                 or re.search(r"\b(?:primary )?tumou?rs?\b|\bsamples?\b|\bpatients?\b|\bcases?\b|\bsections?\b|\bmetasta\w*", s, re.I))
     if SURVIVAL_COMPARE.search(s):  # never skipped: answered (or blocked) with the groups' deaths shown
         return True, ""
+    if RATIO_CUE.search(s.lower()) and mentions:  # "twice as many ER-positive as ER-negative tumors"
+        return True, ""
     if CLINICAL_WORDS.search(s) and mentions:
         return True, ""
     if mentions and QUANT_WORDS.search(s):
@@ -438,49 +460,54 @@ def parse_filters(text):
     filters = []
     seen = set()
 
-    def add(f):
+    def add(f, pos=0):
         key = (f["attr"], f["label"])
         if key not in seen:
             seen.add(key)
+            f["pos"] = pos  # where the group is named in the sentence
             filters.append(f)
 
-    if re.search(r"triple[- ]negative|\btnbc\b", low):
-        add(_status_filter("er", "negative", "ER-negative"))
-        add(_status_filter("pr", "negative", "PR-negative"))
-        add(_status_filter("her2", "negative", "HER2-negative"))
+    tn = re.search(r"triple[- ]negative|\btnbc\b", low)
+    if tn:
+        add(_status_filter("er", "negative", "ER-negative"), tn.start())
+        add(_status_filter("pr", "negative", "PR-negative"), tn.start())
+        add(_status_filter("her2", "negative", "HER2-negative"), tn.start())
     val = r"(positive|negative|\+|-(?=\s|$|[.,;)]))"
     for attr, name, label in (("er", r"(?:\ber|estrogen[- ]receptor)", "ER"),
                               ("pr", r"(?:\bpr|progesterone[- ]receptor)", "PR"),
                               ("her2", r"\bher2(?![- ]enriched)", "HER2")):
         for m in re.finditer(name + r"(?:\s+status)?\s*[- ]?\s*" + val, low):
             v = "positive" if m.group(1) in ("positive", "+") else "negative"
-            add(_status_filter(attr, v, f"{label}-{v}"))
+            add(_status_filter(attr, v, f"{label}-{v}"), m.start())
     # stage
     m = re.search(r"\bstage\s+(iv|iii|ii|i|4|3|2|1)\b", low)
     if m:
         g = {"4": "iv", "3": "iii", "2": "ii", "1": "i"}.get(m.group(1), m.group(1))
-        add({"attr": "stage", "label": f"stage {g.upper()}", "test": lambda v, g=g: v == g})
+        add({"attr": "stage", "label": f"stage {g.upper()}", "test": lambda v, g=g: v == g}, m.start())
     elif re.search(r"\bearly[- ]stage\b", low):
-        add({"attr": "stage", "label": "early stage (I-II)", "test": lambda v: v in ("i", "ii")})
+        add({"attr": "stage", "label": "early stage (I-II)", "test": lambda v: v in ("i", "ii")}, re.search(r"\bearly[- ]stage\b", low).start())
     elif re.search(r"\b(?:late|advanced)[- ]stage\b", low):
-        add({"attr": "stage", "label": "advanced stage (III-IV)", "test": lambda v: v in ("iii", "iv")})
+        add({"attr": "stage", "label": "advanced stage (III-IV)", "test": lambda v: v in ("iii", "iv")},
+            re.search(r"\b(?:late|advanced)[- ]stage\b", low).start())
     # histology
     for token in ("ductal", "lobular", "mucinous", "medullary", "metaplastic"):
-        if re.search(rf"\b{token}\b", low):
-            add({"attr": "histology", "label": token, "test": lambda v, t=token: v is not None and t in v})
+        hm = re.search(rf"\b{token}\b", low)
+        if hm:
+            add({"attr": "histology", "label": token, "test": lambda v, t=token: v is not None and t in v}, hm.start())
     # PAM50 subtype
     for pat, token, label in ((r"luminal a\b|\blum ?a\b|\bluma\b", "luma", "Luminal A"),
                               (r"luminal b\b|\blum ?b\b|\blumb\b", "lumb", "Luminal B"),
                               (r"her2[- ]enriched", "her2", "HER2-enriched"),
                               (r"\bbasal(?:[- ]like)?\b", "basal", "Basal-like"),
                               (r"normal[- ]like", "normal", "Normal-like")):
-        if re.search(pat, low):
-            add({"attr": "subtype", "label": label, "test": lambda v, t=token: v is not None and t in v})
+        sm = re.search(pat, low)
+        if sm:
+            add({"attr": "subtype", "label": label, "test": lambda v, t=token: v is not None and t in v}, sm.start())
     # gender
-    if re.search(r"\bfemales?\b", low):
-        add({"attr": "gender", "label": "female", "test": lambda v: v == "female"})
-    elif re.search(r"\bmales?\b", low):
-        add({"attr": "gender", "label": "male", "test": lambda v: v == "male"})
+    gm = re.search(r"\bfemales?\b", low) or re.search(r"\bmales?\b", low)
+    if gm:
+        g = "female" if gm.group(0).startswith("f") else "male"
+        add({"attr": "gender", "label": g, "test": lambda v, g=g: v == g}, gm.start())
     return filters
 
 
@@ -591,6 +618,60 @@ def parse_gene_claim(text, genes):
         ext = {"direction": word, "rank": ORDINAL.get(m.group(1) or "", 1), "top": CARDINAL.get(m.group(2) or "", 1)}
     return {"type": "gene", "genes": genes, "extremum": ext, "quantifier": None if ext else parse_quantifier(text),
             "filters": parse_filters(text), "pop_code": "01", "pop_label": "primary tumor samples"}
+
+
+# ---- ratio claims: "outnumber by about two to one", "twice as many", "roughly 3:1" ----
+RATIO_WORD = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+RATIO_N = r"(\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)"
+RATIO_CMP = r"(?:\b(about|around|approximately|roughly|nearly|almost|more than|over|at least|less than|fewer than|under|at most)\s+)?"
+RATIO_FORMS = [
+    re.compile(RATIO_CMP + r"(?:by\s+)?" + RATIO_N + r"\s*:\s*" + RATIO_N + r"\b"),
+    re.compile(RATIO_CMP + r"(?:by\s+)?" + RATIO_N + r"[- ]to[- ]" + RATIO_N + r"\b(?!\s*(?:%|percent))"),
+    re.compile(RATIO_CMP + r"\b(twice|thrice|half|(?:" + RATIO_N[1:-1] + r")\s+times)\s+(?:as\s+(?:many|common|frequent|numerous|often)|more\s+(?:common|frequent|numerous|often)?)"),
+]
+RATIO_CUE = re.compile(r"outnumber\w*|\bratio\b|\bas many\b|\btimes as\b|\btimes more\b|\btwice\b|\bthrice\b|\bhalf as\b|\d\s*:\s*\d")
+RATIO_COMPARATOR = {None: "~r", "about": "~r", "around": "~r", "approximately": "~r", "roughly": "~r", "nearly": "~r", "almost": "~r",
+                    "more than": ">", "over": ">", "at least": ">=", "less than": "<", "fewer than": "<", "under": "<", "at most": "<="}
+
+
+def _ratio_number(word):
+    return float(word) if re.match(r"^\d", word) else float(RATIO_WORD[word])
+
+
+def parse_ratio(text):
+    """'Basal-like tumors outnumber HER2-enriched tumors by about two to one' -> the ratio claimed, how to read it,
+    and the groups in the order they are named (the first one is the numerator). None if it is not a ratio claim."""
+    low = text.lower().replace("’", "'")
+    if not RATIO_CUE.search(low):
+        return None
+    for i, rx in enumerate(RATIO_FORMS):
+        m = rx.search(low)
+        if not m:
+            continue
+        if i == 1 and not re.search(r"outnumber\w*|\bratio\b", low):
+            continue  # "500 to 600 samples" is a range, not a ratio
+        if i < 2:
+            a, b = _ratio_number(m.group(2)), _ratio_number(m.group(3))
+            if not b or b > 10:
+                continue
+            value = a / b
+        else:
+            w = m.group(2)
+            value = {"twice": 2.0, "thrice": 3.0, "half": 0.5}.get(w) or _ratio_number(w.split()[0])
+        comp = RATIO_COMPARATOR[m.group(1)]
+        said = m.group(0).strip()
+        reading = (f"'{said}' means {value:g} to 1" + (f" (within {int(CFG['ratio_tolerance'] * 100)} percent)" if comp == "~r" else f", read as {comp} {value:g}"))
+        filters = sorted(parse_filters(text), key=lambda x: x.get("pos", 0))
+        groups = []
+        for x in filters:  # filters named at the same place form one group (triple-negative is ER-, PR- and HER2-)
+            if groups and groups[-1][0]["pos"] == x["pos"]:
+                groups[-1].append(x)
+            else:
+                groups.append([x])
+        others = bool(re.search(r"\b(?:all\s+)?(?:other|others|the rest|remaining)\b", low))
+        return {"type": "ratio", "quantifier": {"kind": "ratio", "comparator": comp, "threshold": value, "reading": reading},
+                "groups": groups, "others": others, "filters": filters, "pop_code": "01", "pop_label": "primary tumor samples"}
+    return None
 
 
 PCT = r"\s*(?:%|percent|per cent)"
@@ -727,6 +808,9 @@ def parse_claim(text):
         return {"type": "survival_compare", "filters": flt, "attr": flt[0]["attr"] if flt else None,
                 "pop_code": tcode if tcode in ("11", "06") else "01",
                 "pop_label": SAMPLE_TYPE_LABEL[tcode if tcode in ("11", "06") else "01"]}
+    rp = parse_ratio(text)
+    if rp:
+        return rp
     genes = gene_mentions(text)
     if genes:
         return parse_gene_claim(text, genes)
@@ -844,16 +928,47 @@ def run_ops(ids, ops, start_label):
     return steps, cur
 
 
+EPS = 1e-9  # a result exactly on a tolerance edge counts as inside it (0.75 - 0.72 is 0.0300000000000000027 in floating point)
+
+
 def satisfied(q, value, count):
-    v = value if q["kind"] == "fraction" else count
+    v = value if q["kind"] in ("fraction", "ratio") else count
     t, c = q["threshold"], q["comparator"]
     if c == "range":  # both ends included
-        return t <= v <= q["high"]
+        return t - EPS <= v <= q["high"] + EPS
+    if c == "~r":  # a ratio, within ratio_tolerance of the claimed one (relative)
+        return value is not None and abs(value - t) <= CFG["ratio_tolerance"] * t + EPS
     if c == "~":
-        return abs(value - t) <= CFG["about_tolerance"]
+        return abs(value - t) <= CFG["about_tolerance"] + EPS
     if c == "~c":
-        return abs(count - t) <= max(1, CFG["about_count_rel"] * t)
+        return abs(count - t) <= max(1, CFG["about_count_rel"] * t) + EPS
     return {"==": v == t, ">": v > t, ">=": v >= t, "<": v < t, "<=": v <= t}[c]
+
+
+def near_tolerance(q, value, count):
+    """For 'about' claims: a reason to send the result to a person when it sits close to the edge of the tolerance,
+    between tolerance / review_band and tolerance x review_band away from the claimed value (on either side). Else None."""
+    c, t, band = q.get("comparator"), q.get("threshold"), CFG["review_band"]
+    if c == "~" and value is not None:
+        gap, tol = abs(value - t), CFG["about_tolerance"]
+        said = f"{value * 100:.1f}% is {gap * 100:.1f} points from the claimed {t * 100:g}%, near the {tol * 100:g}-point tolerance"
+    elif c == "~c" and count is not None:
+        gap, tol = abs(count - t), max(1, CFG["about_count_rel"] * t)
+        said = f"{int(count)} is {int(gap)} from the claimed {int(t)}, near the {tol:g} allowed"
+    elif c == "~r" and value is not None:
+        gap, tol = abs(value - t), CFG["ratio_tolerance"] * t
+        said = f"{value:.2f} to 1 is {gap / t * 100:.0f} percent from the claimed {t:g} to 1, near the {CFG['ratio_tolerance'] * 100:g} percent tolerance"
+    else:
+        return None
+    if gap and tol / band - EPS <= gap <= tol * band + EPS:
+        return f"The result {said} for 'about'; a person should decide whether it counts."
+    return None
+
+
+def review_if_near(f, q, count):
+    note = near_tolerance(q, None, count)
+    if note:
+        f["needs_human_review"], f["review_reason"] = True, note
 
 
 def range_edges(q):
@@ -1075,6 +1190,8 @@ def evaluate_claim(ctx, fid, text):
         return gene_finding(ctx, f, parsed)
     if parsed["type"] == "survival_compare":
         return survival_compare_finding(ctx, f, parsed)
+    if parsed["type"] == "ratio":
+        return ratio_finding(ctx, f, parsed)
     if "mutation" in parsed.get("targets", []) and GENEISH.search(text) and not MUTATION_DATA_WORDS.search(text):
         # Reads like a claim about a gene ("is mutated in a third of tumors") but no gene was recognised:
         # never answer it with how many tumors have mutation data.
@@ -1168,6 +1285,9 @@ def evaluate_claim(ctx, fid, text):
         near = bool(edges) and min(abs(lead - b) for b in edges) <= (CFG["borderline_margin"] if q["kind"] == "fraction" else 0)
         if near:
             reasons.append(f"The result sits {missing_text(q, lead)}.")
+    note = near_tolerance(q, value, num)
+    if note:
+        reasons.append(note)
     if not ok and q["comparator"] in ("==", ">=", ">") and q["kind"] == "fraction" and den - num > 0 and q["comparator"] == "==":
         ev["calculation"] += f" {den - num} of {den} samples fall short of 'all'."
     if low_events:
@@ -1219,6 +1339,8 @@ def evaluate_claim(ctx, fid, text):
 
 def sampletype_finding(ctx, f, parsed, code):
     """'There are 7 metastatic samples': count one sample type from the manifest's sample_type column."""
+    if not ctx.all_samples:
+        return no_samples(f)
     ids, src = ctx.sample_type_ids(code)
     name, label = L.SAMPLE_TYPE_NAMES[code], SAMPLE_TYPE_LABEL[code]
     n, total, q = len(ids), len(ctx.all_samples), parsed["quantifier"]
@@ -1233,6 +1355,7 @@ def sampletype_finding(ctx, f, parsed, code):
     f["cohort_trace"] = [{"step": "samples in the release", "n_before": total, "n_after": total},
                          {"step": f"sample_type is {name}", "n_before": total, "n_after": n}]
     f["verdict"] = "supported" if ok else "contradicted"
+    review_if_near(f, q, n)
     f["limitation"] = ("Counts come from the release's sample list: one sample is one barcode, and one patient can have several samples. "
                        "The sample type is as recorded in the manifest; it was not checked against the tissue itself.")
     if ok:
@@ -1276,6 +1399,7 @@ def slidecount_finding(ctx, f, parsed):
     if kind:
         f["cohort_trace"].append({"step": what, "n_before": total, "n_after": n})
     f["verdict"] = "supported" if ok else "contradicted"
+    review_if_near(f, q, n)
     f["limitation"] = ("Counts come from slide_manifest.csv, one row per slide image listed in NCI Imaging Data Commons; "
                        "a sample can have several slides, and the slides themselves were not opened or checked.")
     if ok:
@@ -1286,7 +1410,79 @@ def slidecount_finding(ctx, f, parsed):
     return f
 
 
-SURVIVAL_NOT_TESTED = "This tool checks data availability, not survival differences: it does not test whether one group lives longer than another."
+def ratio_finding(ctx, f, parsed):
+    """'Basal-like tumors outnumber HER2-enriched tumors by about two to one': count both groups among primary tumors."""
+    groups, q = parsed["groups"], parsed["quantifier"]
+    keys = list(OrderedDict.fromkeys(x["attr"] for x in parsed["filters"]))
+    absent = [ATTR_SPECS[k]["label"] for k in keys if k not in ctx.attrs]
+    if absent:
+        f["evidence"]["calculation"] = f"not run: not found in the clinical file: {absent}"
+        f["limitation"] = f"The data cannot answer this: {', '.join(absent)} not available."
+        f["guardrail_flags"] = ["data_cannot_answer"]
+        f["next_actions"] = ["Check the column names in the clinical file."]
+        return f
+    if not groups or (len(groups) < 2 and not parsed["others"]):
+        f["evidence"]["calculation"] = "not run: the claim compares groups, but fewer than two groups this tool can form were named"
+        f["limitation"] = "No verdict: the groups being compared could not be read (this tool reads ER, PR, HER2, stage, histology, PAM50 subtype and gender)."
+        f["needs_human_review"], f["review_reason"] = True, "A ratio claim whose two groups could not both be read; it was not checked."
+        f["next_actions"] = ["Name both groups, for example: Basal-like tumors outnumber HER2-enriched tumors by about two to one."]
+        return f
+    pop = ctx.population(parsed["pop_code"])
+    in_group = lambda s, g: all(x["test"](ctx.attr(x["attr"], s)) for x in g)
+    name = lambda g: ("triple-negative" if {x["label"] for x in g} == {"ER-negative", "PR-negative", "HER2-negative"}
+                      else " and ".join(x["label"] for x in g))
+    ga = groups[0]
+    a_ids = [s for s in pop if in_group(s, ga)]
+    label_a = name(ga)
+    if len(groups) >= 2:
+        gb = groups[1]
+        b_ids = [s for s in pop if in_group(s, gb)]
+        label_b = name(gb)
+    else:  # "outnumber all other subtypes": the rest of the samples where the same fields are recorded
+        a_set = set(a_ids)
+        b_ids = [s for s in pop if s not in a_set and all(ctx.attr(x["attr"], s) is not None for x in ga)]
+        label_b = "all other recorded " + " and ".join(ATTR_SPECS[x["attr"]]["label"] for x in ga)
+    na, nb = len(a_ids), len(b_ids)
+    either = len(set(a_ids) | set(b_ids))
+    ratio = na / nb if nb else None
+    slug = lambda t: re.sub(r"\W+", "_", t.lower()).strip("_")
+    shown = f"{label_a} {na}; {label_b} {nb}"
+    f["evidence"].update({
+        "metric_name": f"ratio_{slug(label_a)}_to_{slug(label_b)}", "value": round(ratio, 3) if ratio is not None else None,
+        "n_samples": na, "denominator": either, "source_files": ["clinical.tsv", "sample_manifest.csv"],
+        "groups": [{"group": label_a, "n": na}, {"group": label_b, "n": nb}]})
+    f["cohort_trace"] = [{"step": parsed["pop_label"], "n_before": len(pop), "n_after": len(pop)},
+                         {"step": f"{label_a} or {label_b}", "n_before": len(pop), "n_after": either},
+                         {"step": label_a, "n_before": either, "n_after": na}]
+    f["limitation"] = limitation_for({"filters": parsed["filters"]}, [])
+    calc = (f"Among {parsed['pop_label']}: {shown}. Ratio {label_a} to {label_b}: {na} / {nb}"
+            + (f" = {ratio:.2f} to 1" if ratio is not None else " (no samples in the second group)") + f". {attr_used_text(ctx, keys)}")
+    if ratio is None:
+        f["evidence"]["calculation"] = calc + "."
+        f["needs_human_review"], f["review_reason"] = True, f"{label_b} has no samples, so the ratio cannot be computed."
+        f["next_actions"] = ["Check the group names against the values in the data."]
+        return f
+    ok = satisfied(q, ratio, na)
+    f["verdict"] = "supported" if ok else "contradicted"
+    f["evidence"]["calculation"] = calc + f". Claim read as: {q['reading']}."
+    reasons = []
+    note = near_tolerance(q, ratio, na)
+    if note:
+        reasons.append(note)
+    thin = [g for g, n in ((label_a, na), (label_b, nb)) if n < CFG["min_group_size"]]
+    if thin:
+        reasons.append(f"{', '.join(thin)} {'has' if len(thin) == 1 else 'have'} fewer than {CFG['min_group_size']} samples, so the ratio is unstable.")
+    if reasons:
+        f["needs_human_review"], f["review_reason"] = True, " ".join(reasons)
+    if ok:
+        f["next_actions"] = ["Check data quality inside the field, not just counts, before relying on the ratio."]
+    else:
+        f["correct_value"] = {"value": round(ratio, 2), "unit": "ratio", "text": f"{ratio:.1f} to 1 ({label_a} {na}, {label_b} {nb})"}
+        f["next_actions"] = [f"Restate the claim with the measured ratio ({ratio:.1f} to 1: {na} vs {nb})."]
+    return f
+
+
+SURVIVAL_NOT_TESTED ="This tool checks data availability, not survival differences: it does not test whether one group lives longer than another."
 SURVIVAL_MISSING = ("A statistical test of the survival difference between the groups, using follow-up time, done by a statistician; "
                     "this tool only shows how many samples, survival records and deaths each group has.")
 
@@ -1475,6 +1671,9 @@ def gene_finding(ctx, f, parsed):
         edges = [q["threshold"]] if q["comparator"] != "range" else range_edges(q)
         if edges and min(abs(lead - b) for b in edges) <= (CFG["borderline_margin"] if q["kind"] == "fraction" else 0):
             reasons.append(f"The result sits {missing_text(q, lead)}.")
+    note = near_tolerance(q, value, num)
+    if note:
+        reasons.append(note)
     if reasons:
         f["needs_human_review"], f["review_reason"] = True, " ".join(reasons)
     if ok:
@@ -1486,7 +1685,18 @@ def gene_finding(ctx, f, parsed):
     return f
 
 
+def no_samples(f):
+    """No sample list and no readable data file: a count cannot be contradicted by nothing."""
+    f["evidence"]["calculation"] = "not run: no samples were found (no sample_manifest.csv and no readable data files)"
+    f["limitation"] = "The data cannot answer this: the data folder holds no readable sample list or data files."
+    f["guardrail_flags"] = ["data_cannot_answer"]
+    f["next_actions"] = ["Point the tool at a release folder that holds the data files, then re-run."]
+    return f
+
+
 def popsize_finding(ctx, f, parsed, total):
+    if not ctx.all_samples:
+        return no_samples(f)
     key = parsed["pop"]
     if key.startswith("type:"):
         return sampletype_finding(ctx, f, parsed, key[5:])
@@ -1503,6 +1713,7 @@ def popsize_finding(ctx, f, parsed, total):
                           "calculation": f"{label}: {n}. Claim read as: {q['reading']}."})
     f["cohort_trace"] = [{"step": label, "n_before": n, "n_after": n}]
     f["verdict"] = "supported" if ok else "contradicted"
+    review_if_near(f, q, n)
     f["limitation"] = "Counts come from the release's sample list: one sample is one barcode, and one patient can have several samples."
     if ok:
         f["next_actions"] = ["State which sample types the count covers (primary tumor, normal tissue, metastasis) so readers can reproduce it."]
@@ -1688,9 +1899,18 @@ def combine_parts(parts, text):
     f["claim_text"] = text
     f["verdict"] = worst["verdict"]
     f["evidence"]["calculation"] = " | ".join(p["evidence"]["calculation"] for p in parts if p["evidence"]["calculation"])
+    # each part keeps its own numbers, so it can be shown, or exported as its own finding (SPLIT_SUBCLAIMS in src/export)
     f["evidence"]["sub_checks"] = [{"claim": p["claim_text"], "verdict": p["verdict"], "value": p["evidence"]["value"],
-                                    "n_samples": p["evidence"]["n_samples"], "denominator": p["evidence"]["denominator"]} for p in parts]
+                                    "n_samples": p["evidence"]["n_samples"], "denominator": p["evidence"]["denominator"],
+                                    "metric_name": p["evidence"]["metric_name"], "calculation": p["evidence"]["calculation"],
+                                    "source_files": list(p["evidence"]["source_files"]),
+                                    "correct_value": p["correct_value"]["text"] if p.get("correct_value") else None,
+                                    "needs_human_review": bool(p["needs_human_review"]), "review_reason": p["review_reason"],
+                                    "guardrail_flags": list(p["guardrail_flags"])} for p in parts]
     f["guardrail_flags"] = list(OrderedDict.fromkeys(fl for p in parts for fl in p["guardrail_flags"]))
+    if f["verdict"] != "insufficient_evidence" and "data_cannot_answer" in f["guardrail_flags"]:
+        # one part could not be answered but another has a verdict: the flag stays on that part (sub_checks)
+        f["guardrail_flags"].remove("data_cannot_answer")
     f["needs_human_review"] = any(p["needs_human_review"] for p in parts)
     reasons = [p["review_reason"] for p in parts if p["review_reason"]]
     f["review_reason"] = " ".join(OrderedDict.fromkeys(reasons)) if reasons else None
@@ -1779,7 +1999,7 @@ def _build_document(ctx, findings, title):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Evidence engine v1.2.1")
+    ap = argparse.ArgumentParser(description="Evidence engine v1.3.0")
     ap.add_argument("--data-dir", default=L.DEFAULT_DIR)
     ap.add_argument("--report", help="text or markdown file with numbered or bulleted claims")
     ap.add_argument("--claim", action="append", default=[], help="a single claim (can repeat)")

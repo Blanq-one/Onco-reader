@@ -86,9 +86,20 @@ class LayerIds:
 
 
 # ---------- reading raw files ----------
+def raw_dir(data_dir):
+    """Where the data files are: data_dir/raw (the fetch.py layout), or data_dir itself when the files sit
+    directly inside it (an envelope release folder). Falls back to data_dir/raw when neither has any."""
+    nested = os.path.join(data_dir, "raw")
+    if any(os.path.exists(os.path.join(nested, s["file"])) for s in LAYERS.values()):
+        return nested
+    if any(os.path.exists(os.path.join(data_dir, s["file"])) for s in LAYERS.values()):
+        return data_dir
+    return nested
+
+
 def ids_from_columns(path):
     with _open(path) as fh:
-        header = next(csv.reader(fh, delimiter="\t"))
+        header = next(csv.reader(fh, delimiter="\t"), [])
     ids = [h.strip()[:15] for h in header[1:] if h.strip().startswith("TCGA-")]
     return LayerIds(ids, "sample")
 
@@ -97,7 +108,9 @@ def ids_from_rows(path):
     """Find the column that holds TCGA barcodes and read it (no assumptions about its name)."""
     with _open(path) as fh:
         reader = csv.reader(fh, delimiter="\t")
-        header = next(reader)
+        header = next(reader, None)
+        if not header:
+            raise ValueError(f"{os.path.basename(path)} is empty")
         rows = []
         for i, row in enumerate(reader):
             rows.append(row)
@@ -124,7 +137,8 @@ def ids_from_rows(path):
 
 
 def load_layers(data_dir):
-    raw = os.path.join(data_dir, "raw")
+    """Sample IDs per data file. A file that is missing, empty or unreadable is listed as missing, never fatal."""
+    raw = raw_dir(data_dir)
     found, missing = OrderedDict(), []
     for name, spec in LAYERS.items():
         path = os.path.join(raw, spec["file"])
@@ -132,7 +146,10 @@ def load_layers(data_dir):
             missing.append(spec["file"])
             continue
         reader = ids_from_columns if spec["kind"] == "columns" else ids_from_rows
-        found[name] = reader(path)
+        try:
+            found[name] = reader(path)
+        except (OSError, ValueError, EOFError, UnicodeError, csv.Error):
+            missing.append(spec["file"])
     return found, missing
 
 
@@ -140,8 +157,9 @@ def load_manifest(data_dir):
     path = os.path.join(data_dir, "sample_manifest.csv")
     if not os.path.exists(path):
         return None
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        rows = list(csv.DictReader(fh))
+    return rows if rows and "sample_id" in rows[0] else None  # a manifest without sample_id cannot be used
 
 
 def load_gene_mutations(data_dir):
@@ -153,7 +171,7 @@ def load_gene_mutations(data_dir):
        "unexpected": up to 5 values that are neither 0 nor 1}
     Genes with no mutation at all are in "names" but not in "mutated".
     """
-    path = os.path.join(data_dir, "raw", LAYERS["mutation"]["file"])
+    path = os.path.join(raw_dir(data_dir), LAYERS["mutation"]["file"])
     if not os.path.exists(path):
         return None
     names, mutated, unexpected = {}, {}, []
@@ -184,7 +202,7 @@ def load_slide_manifest(data_dir):
     path = os.path.join(data_dir, "slide_manifest.csv")
     if not os.path.exists(path):
         return None
-    with open(path, newline="", encoding="utf-8") as fh:
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
         return list(csv.DictReader(fh))
 
 
@@ -295,7 +313,7 @@ def verify_checksums(data_dir):
         known = {h.lower() for h in HEX64.findall(fh.read())}
     files, bad = OrderedDict(), []
     for spec in LAYERS.values():
-        path = os.path.join(data_dir, "raw", spec["file"])
+        path = os.path.join(raw_dir(data_dir), spec["file"])
         if not os.path.exists(path):
             continue
         digests = [_sha256_file(path)]

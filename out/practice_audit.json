@@ -15,7 +15,9 @@
     "borderline_margin": 0.02,
     "min_population": 30,
     "min_events": 20,
-    "min_group_size": 30
+    "min_group_size": 30,
+    "ratio_tolerance": 0.15,
+    "review_band": 1.5
   },
   "guardrails_source": "src/guardrails",
   "data_notes": [
@@ -130,14 +132,37 @@
             "verdict": "supported",
             "value": 1101,
             "n_samples": 1101,
-            "denominator": 1101
+            "denominator": 1101,
+            "metric_name": "population_size_primary",
+            "calculation": "primary tumor samples: 1101. Claim read as: 'exactly 1101' tumors.",
+            "source_files": [
+              "sample_manifest.csv"
+            ],
+            "correct_value": null,
+            "needs_human_review": false,
+            "review_reason": null,
+            "guardrail_flags": []
           },
           {
             "claim": "535 primary tumors have survival, mutation, copy number, RNA and protein data.",
             "verdict": "supported",
             "value": 535,
             "n_samples": 535,
-            "denominator": 1101
+            "denominator": 1101,
+            "metric_name": "count_has_survival_has_mutation_has_copy_number_has_rna_has_protein",
+            "calculation": "samples with survival and mutation and copy number and RNA and protein among primary tumor samples: 535 / 1101 = 48.6%. OS deaths among these 535 samples: 76. Claim read as: 'exactly 535' tumors.",
+            "source_files": [
+              "survival.tsv",
+              "mutation_gene_level.tsv.gz",
+              "copy_number_gistic.tsv.gz",
+              "rna_hiseq.tsv.gz",
+              "protein_rppa.tsv.gz",
+              "sample_manifest.csv"
+            ],
+            "correct_value": null,
+            "needs_human_review": false,
+            "review_reason": null,
+            "guardrail_flags": []
           }
         ]
       },
@@ -206,14 +231,34 @@
             "verdict": "supported",
             "value": 421,
             "n_samples": 421,
-            "denominator": 844
+            "denominator": 844,
+            "metric_name": "extremum_subtype",
+            "calculation": "Groups of PAM50 subtype among primary tumor samples with it recorded (844 of 1101): Luminal A 421; Luminal B 192; Basal-like 141; HER2-enriched 67; Normal-like 23. The largest group is Luminal A (421 of 844). Claim: Luminal A is the largest. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)).",
+            "source_files": [
+              "clinical.tsv",
+              "sample_manifest.csv"
+            ],
+            "correct_value": null,
+            "needs_human_review": false,
+            "review_reason": null,
+            "guardrail_flags": []
           },
           {
             "claim": "Luminal A accounts for about 62% of primary tumors with an RNA subtype call.",
             "verdict": "contradicted",
             "value": 0.4988,
             "n_samples": 421,
-            "denominator": 844
+            "denominator": 844,
+            "metric_name": "share_luminal_a",
+            "calculation": "Luminal A among primary tumor samples with PAM50 subtype recorded: 421 / 844 = 49.9%. PAM50 subtype read from PAM50Call_RNAseq (recorded for 844 of 1101 primary tumors; alternatives: PAM50_mRNA_nature2012 (522), Integrated_Clusters_with_PAM50__nature2012 (348)). Claim read as: 'about 62 percent' (within 3 points).",
+            "source_files": [
+              "clinical.tsv",
+              "sample_manifest.csv"
+            ],
+            "correct_value": "49.9% (421 of 844)",
+            "needs_human_review": false,
+            "review_reason": null,
+            "guardrail_flags": []
           }
         ]
       },
@@ -281,7 +326,7 @@
       ],
       "robustness": null,
       "correct_value": null,
-      "missing_evidence": "Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, survival times, and molecular layers, but no treatment or response data.",
+      "missing_evidence": "Treatment-response records. clinical.tsv has yes/no treatment flags (radiation_therapy, targeted_molecular_therapy, additional_pharmaceutical_therapy) but no hormone-therapy records and no treatment response, so who responded to a treatment cannot be checked.",
       "source_sentence": "Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy, which suggests protein data could guide treatment research."
     }
   ],

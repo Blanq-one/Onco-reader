@@ -183,7 +183,7 @@
       "kind": "claim_check",
       "claim_text": "Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy, which suggests protein data could guide treatment research.",
       "claim_verdict": "insufficient_evidence",
-      "summary": "Insufficient evidence. Blocked: this reads as a treatment response claim, and this tool checks data readiness only. Data needed: Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, survival times, and molecular layers, but no treatment or response data.",
+      "summary": "Insufficient evidence. Blocked: this reads as a treatment response claim, and this tool checks data readiness only. Data needed: Treatment-response records. clinical.tsv has yes/no treatment flags (radiation_therapy, targeted_molecular_therapy, additional_pharmaceutical_therapy) but no hormone-therapy records and no treatment response, so who responded to a treatment cannot be checked.",
       "severity": "medium",
       "confidence": "medium",
       "needs_human_review": true,
@@ -202,7 +202,7 @@
         {
           "kind": "release",
           "id": "raw",
-          "note": "Data needed, not found in this release: Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, survival times, and molecular layers, but no treatment or response data."
+          "note": "Data needed, not found in this release: Treatment-response records. clinical.tsv has yes/no treatment flags (radiation_therapy, targeted_molecular_therapy, additional_pharmaceutical_therapy) but no hormone-therapy records and no treatment response, so who responded to a treatment cannot be checked."
         },
         {
           "kind": "analysis",

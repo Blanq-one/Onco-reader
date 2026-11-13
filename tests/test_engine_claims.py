@@ -55,12 +55,20 @@ SLIDE_KINDS = ["diagnostic (FFPE)"] * 12 + ["frozen, top section"] * 6 + ["froze
 MUTATIONS = {"PIK3CA": PRIMARY[:12], "TP53": PRIMARY[:10], "GATA3": PRIMARY[:4], "CDH1": PRIMARY[:2], "TTN": []}
 
 
-def write_release(folder, mutation_rows=None, er=None):
-    """Write sample_manifest.csv, slide_manifest.csv and raw/ files; returns the folder."""
-    raw = os.path.join(folder, "raw")
+def write_release(folder, mutation_rows=None, er=None, flat=False, manifests=True):
+    """Write sample_manifest.csv, slide_manifest.csv and the data files; returns the folder.
+    flat=True puts the data files directly in the folder (an envelope release) instead of raw/."""
+    raw = folder if flat else os.path.join(folder, "raw")
     os.makedirs(raw, exist_ok=True)
     samples = PRIMARY + NORMAL + METASTASIS
     types = {"01": "Primary Tumor", "11": "Solid Tissue Normal", "06": "Metastatic"}
+    if manifests:
+        _write_manifests(folder, samples, types)
+    _write_data(raw, samples, mutation_rows, er)
+    return folder
+
+
+def _write_manifests(folder, samples, types):
     with open(os.path.join(folder, "sample_manifest.csv"), "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["sample_id", "patient_id", "sample_type", "in_clinical", "has_survival", "has_mutation",
@@ -73,6 +81,9 @@ def write_release(folder, mutation_rows=None, er=None):
         for i, kind in enumerate(SLIDE_KINDS):
             s = PRIMARY[i % len(PRIMARY)]
             w.writerow([f"{s}A-01-X{i}", s, s[:12], kind, 40])
+
+
+def _write_data(raw, samples, mutation_rows, er):
     er = er or {s: ("Negative" if i % 4 == 0 else "Positive") for i, s in enumerate(PRIMARY)}  # 10 negative, 30 positive
     with open(os.path.join(raw, "clinical.tsv"), "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh, delimiter="\t")
@@ -92,7 +103,6 @@ def write_release(folder, mutation_rows=None, er=None):
             w.writerow(["sample"] + cols)
             for gene, mutated in mutation_rows.items():
                 w.writerow([gene] + [1 if c in mutated else 0 for c in cols])
-    return folder
 
 
 def check(ctx, text, case):
@@ -537,6 +547,164 @@ class TestSurvivalComparisonsReal(RealCase):
         self.assertEqual([c for c in header if E.HORMONE_WORDS.search(c)], [])
         f = self.run_claim("Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy.")
         self.assertIn("no hormone-therapy records and no treatment response", f["missing_evidence"])
+
+
+# ---------- item 6: ratio claims ----------
+class TestRatiosSynthetic(SyntheticCase):
+    # primary tumors: 30 ER-positive, 10 ER-negative -> exactly 3 to 1
+
+    def test_ratio_readings(self):
+        for text, verdict in (("ER-positive tumors outnumber ER-negative tumors 3:1.", "supported"),
+                              ("ER-positive tumors outnumber ER-negative tumors by about three to one.", "supported"),
+                              ("There are three times as many ER-positive as ER-negative tumors.", "supported"),
+                              ("There are twice as many ER-positive as ER-negative tumors.", "contradicted"),
+                              ("ER-positive tumors outnumber ER-negative tumors by more than 3 to 1.", "contradicted"),  # 3.0 is not more
+                              ("ER-positive tumors outnumber ER-negative tumors by at least 3 to 1.", "supported"),
+                              ("There are half as many ER-negative as ER-positive tumors.", "contradicted")):          # 0.33, not 0.5
+            f = check(self.ctx, text, self)
+            self.assertEqual(f["verdict"], verdict, text)
+            self.assertTrue(f["evidence"]["metric_name"].startswith("ratio_"), text)
+
+    def test_numbers_and_correct_value(self):
+        f = check(self.ctx, "There are twice as many ER-positive as ER-negative tumors.", self)
+        ev = f["evidence"]
+        self.assertEqual((ev["value"], ev["n_samples"], ev["denominator"]), (3.0, 30, 40))
+        self.assertEqual(ev["groups"], [{"group": "ER-positive", "n": 30}, {"group": "ER-negative", "n": 10}])
+        self.assertEqual(cv_text(f), "3.0 to 1 (ER-positive 30, ER-negative 10)")
+        self.assertIn("fewer than 30 samples", f["review_reason"])  # ER-negative has 10
+
+    def test_extracted_not_skipped(self):
+        claims, skipped = E.extract_claims("There are twice as many ER-positive as ER-negative tumors.")
+        self.assertEqual((len(claims), skipped), (1, []))
+
+    def test_unreadable_groups_and_ranges(self):
+        f = check(self.ctx, "Smokers outnumber nonsmokers two to one.", self)
+        self.assertEqual(f["verdict"], "insufficient_evidence")
+        self.assertIn("could not both be read", f["review_reason"])
+        self.assertIsNone(E.parse_ratio("From 25 to 35 primary tumors have mutation data."))  # a range, not a ratio
+
+
+class TestRatiosReal(RealCase):
+    def test_ratios_match_pandas(self):
+        clin = pd.read_csv(os.path.join(DATA_DIR, "raw", "clinical.tsv"), sep="\t", low_memory=False)
+        clin = clin[clin.sampleID.str[13:15] == "01"]
+        pam = clin.PAM50Call_RNAseq.value_counts()
+        basal, her2 = int(pam["Basal"]), int(pam["Her2"])
+        f = self.run_claim("Basal-like tumors outnumber HER2-enriched tumors by about two to one.")
+        self.assertEqual((f["evidence"]["groups"][0]["n"], f["evidence"]["groups"][1]["n"]), (basal, her2))
+        self.assertAlmostEqual(f["evidence"]["value"], round(basal / her2, 3))
+        self.assertEqual(f["verdict"], "supported" if abs(basal / her2 - 2) <= 0.15 * 2 else "contradicted")
+        col = next(n["column_used"] for n in self.ctx.attr_notes if n["attribute"] == "ER status")
+        st = clin[col].astype(str).str.lower()
+        pos, neg = int(st.str.startswith("pos").sum()), int(st.str.startswith("neg").sum())
+        f = self.run_claim("There are twice as many ER-positive as ER-negative tumors.")
+        self.assertEqual((f["verdict"], cv_text(f)), ("contradicted", f"{pos / neg:.1f} to 1 (ER-positive {pos}, ER-negative {neg})"))
+        f = self.run_claim("ER-positive tumors outnumber ER-negative tumors roughly 3:1.")
+        self.assertEqual(f["verdict"], "supported" if abs(pos / neg - 3) <= 0.45 else "contradicted")
+
+
+# ---------- item 7: a release folder with the data files directly inside, no sources.csv ----------
+MIXED = ("Of the 40 primary tumors in the release, 30 have mutation data. There are 2 metastatic samples. "
+         "TP53 is mutated in about a third of tumors. There are 12 diagnostic slides. "
+         "ER-positive tumors outnumber ER-negative tumors 3:1. Of the 50 primary tumors in the release, 30 have RNA data.")
+
+
+class TestReleaseFolders(unittest.TestCase):
+    def audit(self, folder):
+        ctx = E.Context(folder)
+        claims, skipped = E.extract_claims(MIXED)
+        return ctx, E.audit(ctx, claims, "mixed", skipped)  # the guardrails post-check runs inside audit()
+
+    def test_flat_folder_without_sources_or_manifests(self):
+        from src.data import tcga_loader as L
+        with tempfile.TemporaryDirectory() as tmp:
+            write_release(tmp, mutation_rows=MUTATIONS, flat=True, manifests=False)
+            self.assertEqual(os.path.abspath(L.raw_dir(tmp)), os.path.abspath(tmp))
+            ctx, doc = self.audit(tmp)
+            self.assertEqual(doc["data_release"]["checksum_status"], "unknown")
+            self.assertEqual(len(ctx.all_samples), 47)  # read from the data files, since there is no manifest
+            self.assertEqual([f["verdict"] for f in doc["findings"]][:3], ["supported", "supported", "supported"])
+            self.assertEqual(doc["findings"][3]["guardrail_flags"], ["data_cannot_answer"])  # no slide list
+            last = doc["findings"][5]  # 50 primary tumors is wrong, and RNA is not in this release
+            self.assertEqual(last["verdict"], "contradicted")
+            self.assertNotIn("data_cannot_answer", last["guardrail_flags"])
+            self.assertIn("data_cannot_answer", last["evidence"]["sub_checks"][1]["guardrail_flags"])
+
+    def test_raw_layout_still_preferred(self):
+        from src.data import tcga_loader as L
+        with tempfile.TemporaryDirectory() as tmp:
+            write_release(tmp, mutation_rows=MUTATIONS)
+            self.assertTrue(L.raw_dir(tmp).endswith("raw"))
+            self.assertEqual(self.audit(tmp)[1]["findings"][3]["verdict"], "supported")  # slides from slide_manifest.csv
+
+    def test_empty_and_broken_folders_never_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx, doc = self.audit(tmp)
+            self.assertEqual((len(ctx.all_samples), doc["data_release"]["checksum_status"]), (0, "unknown"))
+            self.assertEqual({f["verdict"] for f in doc["findings"]}, {"insufficient_evidence"})  # nothing is contradicted by nothing
+        with tempfile.TemporaryDirectory() as tmp:
+            open(os.path.join(tmp, "clinical.tsv"), "w").close()
+            with open(os.path.join(tmp, "survival.tsv"), "w") as fh:
+                fh.write("garbage\n")
+            with open(os.path.join(tmp, "protein_rppa.tsv.gz"), "wb") as fh:
+                fh.write(b"not gzip")
+            with gzip.open(os.path.join(tmp, "mutation_gene_level.tsv.gz"), "wt") as fh:
+                fh.write("")
+            with open(os.path.join(tmp, "sample_manifest.csv"), "w") as fh:
+                fh.write("foo,bar\n1,2\n")
+            ctx, doc = self.audit(tmp)
+            self.assertIn("protein_rppa.tsv.gz", ctx.missing)
+            self.assertEqual(len(doc["findings"]), 6)
+
+
+ENVELOPE = os.path.join(ROOT, "..", "challenge-ref", "envelopes", "opened", "practice", "release")
+
+
+@unittest.skipIf(not os.path.isdir(ENVELOPE), "practice envelope not opened (python envelopes/unseal.py practice ...)")
+class TestPracticeEnvelopeRelease(unittest.TestCase):
+    def test_envelope_release_loads(self):
+        ctx = E.Context(ENVELOPE)
+        self.assertEqual(ctx.checksums["status"], "unknown")
+        self.assertEqual(ctx.missing, ["rna_hiseq.tsv.gz"])  # envelope releases carry no RNA
+        self.assertGreater(len(ctx.population("01")), 1000)
+        claims, skipped = E.extract_claims("TP53 is mutated in about a third of tumors. RNA data is available for most samples.")
+        doc = E.audit(ctx, claims, "envelope", skipped)
+        self.assertEqual([f["verdict"] for f in doc["findings"]], ["supported", "insufficient_evidence"])
+
+
+# ---------- item 8: results close to the edge of the 'about' tolerance go to a person ----------
+class TestReviewBandSynthetic(SyntheticCase):
+    # 30 of 40 primary tumors (75%) have mutation data; tolerance 3 points, band 2 to 4.5 points
+
+    def test_band_on_both_sides(self):
+        for claimed, verdict, review in ((75, "supported", False), (74, "supported", False), (73, "supported", True),
+                                         (72, "supported", True), (71, "contradicted", True), (70, "contradicted", False)):
+            f = check(self.ctx, f"About {claimed}% of primary tumors have mutation data.", self)
+            self.assertEqual((f["verdict"], f["needs_human_review"]), (verdict, review), claimed)
+            if review:
+                self.assertIn("near the 3-point tolerance", f["review_reason"])
+
+    def test_band_for_ratios_and_counts(self):
+        f = check(self.ctx, "ER-positive tumors outnumber ER-negative tumors by about 3.5 to 1.", self)  # 3.0 is 14% off
+        self.assertEqual(f["verdict"], "supported")
+        self.assertIn("near the 15 percent tolerance", f["review_reason"])
+        f = check(self.ctx, "There are about 21 diagnostic slides.", self)  # 12: far outside, no band
+        self.assertEqual((f["verdict"], f["needs_human_review"]), ("contradicted", False))
+
+
+class TestReviewBandReal(RealCase):
+    def test_her2_inside_the_band_goes_to_review(self):
+        f = self.run_claim("About 15 percent of tumors are HER2-positive.")
+        share = f["evidence"]["n_samples"] / f["evidence"]["denominator"]
+        self.assertTrue(0.02 <= abs(share - 0.15) <= 0.045)
+        self.assertEqual((f["verdict"], f["needs_human_review"]), ("supported" if abs(share - 0.15) <= 0.03 else "contradicted", True))
+
+    def test_practice_brief_unchanged(self):
+        brief = os.path.join(DATA_DIR, "..", "..", "products", "research-claim-auditor", "practice_brief.md")
+        claims, skipped = E.extract_claims(open(brief, encoding="utf-8").read())
+        doc = E.audit(self.ctx, claims, "practice_brief.md", skipped)
+        self.assertEqual([(f["verdict"], f["needs_human_review"]) for f in doc["findings"]],
+                         [("supported", False), ("contradicted", False), ("insufficient_evidence", True)])
 
 
 if __name__ == "__main__":
