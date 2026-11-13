@@ -1,6 +1,6 @@
 import { h } from '../util.js';
 import { state, findings, saveFilters, FLAG_TEXT, isBlocked, hasNumber } from '../state.js';
-import { verdictBadge, flagChips, headlineText } from '../ui.js';
+import { verdictBadge, flagChips, headlineText, factLine } from '../ui.js';
 import { pct } from '../util.js';
 
 let active = -1;
@@ -82,7 +82,7 @@ export function resultsPage() {
     return h('li', { class: 'claim-row' + (i === active ? ' active' : ''), 'data-i': i },
       h('div', { class: 'pick no-print' }, cb),
       h('a', { class: 'claim-link', href: '#/claim/' + encodeURIComponent(x.id) }, verdictBadge(x),
-        h('div', { class: 'text' }, h('div', {}, x.claim_text), h('div', { class: 'meta' }, h('span', { class: 'chip' }, x.id), flagChips(x))),
+        h('div', { class: 'text' }, h('div', {}, x.claim_text), factLine(x) ? h('div', { class: 'muted', style: 'font-size:.9rem' }, factLine(x)) : null, h('div', { class: 'meta' }, h('span', { class: 'chip' }, x.id), flagChips(x))),
         h('div', { class: 'num' }, hl ? [hl, h('small', {}, pct(x.evidence.n_samples, x.evidence.denominator))] : h('small', {}, isBlocked(x) ? 'No number' : 'No number available'))));
   }
   draw();

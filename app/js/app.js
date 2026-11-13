@@ -1,11 +1,12 @@
 import { h, store, toast, reduceMotion } from './util.js';
-import { state, loadData, byId, findings } from './state.js';
+import { state, dataParam, loadData, byId, findings } from './state.js';
 import { startPage, aboutPage, notFoundPage } from './pages/start.js';
 import { resultsPage, resultsShortcut } from './pages/results.js';
 import { claimPage, claimShortcut } from './pages/claim.js';
+import { extractPage } from './pages/extract.js';
 import { comparePage, reviewPage, summaryPage } from './pages/more.js';
 
-const NAV = [['#/', 'Start'], ['#/results', 'Results'], ['#/review', 'Review'], ['#/compare', 'Compare'], ['#/summary', 'Summary'], ['#/about', 'About']];
+const NAV = [['#/', 'Start'], ['#/extract', 'Extraction'], ['#/results', 'Results'], ['#/review', 'Review'], ['#/compare', 'Compare'], ['#/summary', 'Summary'], ['#/about', 'About']];
 const OPEN = ['/', '/about'];
 let current = { path: null };
 
@@ -62,13 +63,15 @@ function route() {
   const r = parseHash();
   if (current.path === '/results') state.scroll = window.scrollY;
   const prev = current.path;
-  if (!state.data && !OPEN.includes(r.path)) {
+  if (!state.data && !state.extract && r.path === '/extract') { /* handled below */ }
+  if (!state.data && !(r.path === '/extract' && state.extract) && !OPEN.includes(r.path)) {
     store('en.intended', r.raw);
     state.notice = 'Load findings first. You will be taken to the page you asked for afterwards.';
     location.hash = '#/'; return;
   }
   let view, crumbs = null, m;
   if (r.path === '/') view = startPage();
+  else if (r.path === '/extract') ({ view, crumbs } = extractPage());
   else if (r.path === '/results') view = resultsPage();
   else if ((m = r.path.match(/^\/claim\/([^/]+)$/)) && byId(decodeURIComponent(m[1]))) ({ view, crumbs } = claimPage(byId(decodeURIComponent(m[1]))));
   else if (r.path === '/compare') ({ view, crumbs } = comparePage(r.q));
@@ -111,7 +114,7 @@ document.addEventListener('keydown', (e) => {
 
 (async function init() {
   buildShell();
-  await loadData();
+  if (dataParam()) await loadData();
   if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#/');
   route();
 })();

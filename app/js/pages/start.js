@@ -1,12 +1,15 @@
-import { h, store, fmtNum } from '../util.js';
-import { state, loadData, setData, findings } from '../state.js';
+import { h, store, fmtNum, toast } from '../util.js';
+import { state, loadData, findings, dataParam, DEMO_FILE } from '../state.js';
+import { checkHealth, extractReport, pdfText } from '../live.js';
 
 const rerender = () => window.dispatchEvent(new Event('hashchange'));
-function enter() {
+const MAX_CHARS = 100000;
+
+function enter(dest) {
   const to = store('en.intended');
   store('en.intended', '');
-  location.hash = to && to.startsWith('/') ? '#' + to : '#/results';
-  if (!to) rerender();
+  location.hash = to && to.startsWith('/') ? '#' + to : dest;
+  if (location.hash === '#' + (to || '')) rerender();
 }
 
 export function checksumBadge(d) {
@@ -20,63 +23,77 @@ export function startPage() {
   const root = h('div', { class: 'page', 'data-title': 'Start' });
   const notice = state.notice; state.notice = null;
   root.append(h('section', { class: 'hero' },
-    h('h1', {}, 'Check claims about TCGA-BRCA against the data'),
-    h('p', { class: 'lead' }, 'Each claim gets a verdict, the numbers behind it, the calculation, and the limit of what the data can say. This tool checks data readiness only. It makes no clinical claims.')));
+    h('h1', {}, 'Audit the numbers in a research report'),
+    h('p', { class: 'lead' }, 'Paste or upload a report. Each claim is pulled out, checked against the TCGA-BRCA data, and given a verdict with the calculation and the limit of what the data can say. A person reviews every verdict. This tool checks data readiness only. It makes no clinical claims.')));
   if (notice) root.append(h('div', { class: 'notice info', role: 'status' }, notice));
-  if (!d) {
-    root.append(h('div', { class: 'notice err', role: 'alert' }, h('b', {}, 'Findings could not be loaded. '), state.error || 'Unknown error.'),
-      h('div', { class: 'row' }, h('button', { class: 'btn primary', type: 'button', onclick: async (ev) => { ev.target.disabled = true; (await loadData()) ? enter() : rerender(); } }, 'Try again'),
-        h('a', { class: 'btn', href: '#/about' }, 'About')),
-      h('p', { class: 'muted', style: 'margin-top:16px' }, 'Serve the repository root with python -m http.server and open /app/. Add ?data=contract/mock_findings.json to load the sample file.'));
-  } else {
-    root.append(h('div', { class: 'checks' },
-      h('span', { class: 'chip' }, 'Release: ' + ((d.data_release && d.data_release.name) || 'unknown')), checksumBadge(d),
-      h('span', { class: 'chip' }, fmtNum(findings().length) + ' claims checked'), h('span', { class: 'chip' }, 'Report: ' + (d.report_title || 'untitled'))),
-      h('div', { class: 'row' },
-        h('button', { class: 'btn primary big', type: 'button', onclick: enter }, 'Open the demo findings'),
-        h('a', { class: 'btn big', href: '#/about' }, 'How this works and what it will not do')));
-  }
-  const slot = h('div', { id: 'live-slot' });
-  root.append(slot);
-  root.afterMount = () => liveBox(slot);
+  if (state.error && !d) root.append(h('div', { class: 'notice err', role: 'alert' }, h('b', {}, 'Data could not be loaded. '), state.error));
+  const liveSlot = h('div', { id: 'live-slot' });
+  root.append(liveSlot);
+
+  const demoMsg = h('div', { role: 'status', 'aria-live': 'polite' });
+  const demoBtn = h('button', { class: 'btn big', type: 'button', id: 'demo-btn' }, 'Demo mode');
+  demoBtn.onclick = async () => {
+    demoBtn.disabled = true; demoMsg.replaceChildren(h('span', { class: 'muted' }, 'Loading the precomputed audit...'));
+    const ok = await loadData(DEMO_FILE);
+    if (ok) { state.mode = 'demo'; enter('#/extract'); } else { demoMsg.replaceChildren(h('div', { class: 'notice err', role: 'alert' }, state.error || 'The demo file could not be loaded.')); demoBtn.disabled = false; }
+  };
+  const demo = h('section', { class: 'card', 'aria-labelledby': 'demo-h' }, h('h2', { id: 'demo-h' }, 'Demo mode'),
+    h('p', { class: 'muted' }, 'Works without a server. Shows the precomputed audit of the practice report from ' + DEMO_FILE.replace('out/', 'out/') + '.'),
+    h('div', { class: 'row' }, demoBtn,
+      d ? h('a', { class: 'btn', href: '#/results' }, 'Open the loaded results (' + fmtNum(findings().length) + ' claims)') : null,
+      h('a', { class: 'btn', href: '#/about' }, 'How this works and what it will not do')), demoMsg);
+  if (d) demo.append(h('div', { class: 'checks' }, h('span', { class: 'chip' }, 'Release: ' + ((d.data_release && d.data_release.name) || 'unknown')), checksumBadge(d),
+    h('span', { class: 'chip' }, 'Report: ' + (d.report_title || 'untitled')), dataParam() ? h('span', { class: 'chip' }, 'Loaded from ?data=' + dataParam()) : null));
+  root.append(demo);
+  root.afterMount = () => liveBox(liveSlot);
   return root;
 }
 
 async function liveBox(slot) {
-  let ok = false;
-  try {
-    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 1500);
-    const r = await fetch('/api/health', { signal: ctl.signal }); clearTimeout(t);
-    ok = r.ok && (await r.json()).ok === true;
-  } catch (e) { ok = false; }
-  if (!ok || !slot.isConnected) return;
-  state.live = true;
-  const mode = h('select', { id: 'live-mode' }, h('option', { value: 'claims' }, 'One claim per line'), h('option', { value: 'report' }, 'Report text'));
-  const ta = h('textarea', { id: 'live-text', placeholder: 'ER status is recorded for most samples.' });
+  if (!(await checkHealth()) || !slot.isConnected) return;
   const status = h('div', { role: 'status', 'aria-live': 'polite' });
-  const go = h('button', { class: 'btn primary', type: 'button' }, 'Check these claims');
+  const ta = h('textarea', { id: 'report-text', rows: 10, placeholder: 'Paste the report text here.' });
+  ta.value = state.reportText || '';
+  const say = (cls, msg) => status.replaceChildren(msg ? h('div', { class: 'notice ' + cls, role: cls === 'err' ? 'alert' : 'status' }, msg) : '');
+  const file = h('input', { type: 'file', id: 'report-file', accept: '.md,.txt,.pdf,text/plain,text/markdown,application/pdf' });
+  file.addEventListener('change', async () => {
+    const f = file.files[0]; if (!f) return;
+    const isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+    if (isPdf) {
+      say('info', 'Reading the PDF...');
+      const t = await pdfText(f);
+      if (t == null) { say('err', 'This server cannot read PDF files. Open the PDF yourself, copy the text, and paste it into the box below.'); return; }
+      ta.value = t; state.reportTitle = f.name; say('info', 'PDF text loaded. Check it before you continue.');
+    } else if (/\.(md|txt)$/i.test(f.name) || f.type.startsWith('text/')) {
+      ta.value = await f.text(); state.reportTitle = f.name; say('', '');
+    } else { say('err', 'Use a .md, .txt or .pdf file, or paste the text.'); }
+  });
+  const practice = h('button', { class: 'btn', type: 'button', id: 'practice-btn' }, 'Use the practice report');
+  practice.onclick = async () => {
+    try {
+      const r = await fetch(new URL('../../samples/practice_brief.md', import.meta.url).href);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      ta.value = await r.text(); state.reportTitle = 'practice_brief.md'; say('', ''); ta.focus();
+    } catch (e) { say('err', 'The practice report could not be loaded.'); }
+  };
+  const go = h('button', { class: 'btn primary', type: 'button', id: 'extract-btn' }, 'Extract claims');
   const cancel = h('button', { class: 'btn', type: 'button', hidden: true }, 'Cancel');
-  let ctl;
-  cancel.onclick = () => ctl && ctl.abort();
+  let ctl; cancel.onclick = () => ctl && ctl.abort();
   go.onclick = async () => {
     const text = ta.value.trim();
-    if (!text) { status.replaceChildren(h('div', { class: 'notice err' }, 'Type or paste at least one claim.')); return; }
-    const body = mode.value === 'report' ? { report: text } : { claims: text.split(/\n+/).map((s) => s.trim()).filter(Boolean) };
+    if (!text) { say('err', 'Paste a report or choose a file first.'); return; }
+    if (text.length > MAX_CHARS) { say('err', 'This report is longer than ' + fmtNum(MAX_CHARS) + ' characters, which is more than the server accepts. Paste a shorter part.'); return; }
     ctl = new AbortController(); go.disabled = true; cancel.hidden = false;
-    status.replaceChildren(h('div', { class: 'progress indet', 'aria-hidden': 'true' }, h('i')), h('span', {}, 'Reading claims and running checks...'));
+    status.replaceChildren(h('div', { class: 'progress indet', 'aria-hidden': 'true' }, h('i')), h('span', {}, 'Finding the checkable claims...'));
     try {
-      const r = await fetch('/api/audit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal });
-      const j = await r.json().catch(() => ({ error: 'The server sent an unreadable answer.' }));
-      if (!r.ok || j.error) throw new Error(j.error || 'The server returned an error (HTTP ' + r.status + ').');
-      setData(j, 'your claims (live)');
-      location.hash = '#/results'; rerender();
-    } catch (e) {
-      status.replaceChildren(h('div', { class: 'notice err', role: 'alert' }, e.name === 'AbortError' ? 'Cancelled.' : e.message));
-    } finally { go.disabled = false; cancel.hidden = true; }
+      await extractReport(text, state.reportTitle, ctl.signal);
+      state.mode = 'live-extract'; location.hash = '#/extract'; rerender();
+    } catch (e) { say('err', e.name === 'AbortError' ? 'Cancelled.' : e.message); } finally { go.disabled = false; cancel.hidden = true; }
   };
-  slot.replaceChildren(h('section', { class: 'card' }, h('h2', {}, 'Run your own claims'),
+  slot.replaceChildren(h('section', { class: 'card', 'aria-labelledby': 'live-h' }, h('h2', { id: 'live-h' }, 'Audit your own report'),
     h('p', { class: 'muted' }, 'Runs on this computer against the local data. Clinical or individual-patient requests are blocked.'),
-    h('label', { for: 'live-mode', class: 'muted' }, 'Input type '), mode, h('div', { style: 'height:8px' }), ta,
+    h('div', { class: 'row' }, practice, h('label', { for: 'report-file', class: 'muted' }, 'or upload a file (.md, .txt, .pdf)'), file),
+    h('label', { for: 'report-text', class: 'muted', style: 'display:block;margin-top:12px' }, 'Report text'), ta,
     h('div', { class: 'row', style: 'margin-top:8px' }, go, cancel), status));
 }
 

@@ -1,6 +1,6 @@
 import { h, fmtNum, fmtValue, pct, store } from '../util.js';
-import { state, findings, byId, isBlocked, hasNumber, decisions, DECISION_TEXT, FLAG_TEXT, VERDICT } from '../state.js';
-import { verdictBadge, flagChips, decisionBlock, breadcrumbs, headlineText } from '../ui.js';
+import { state, findings, byId, isBlocked, hasNumber, decisions, reviewStatus, FLAG_TEXT, VERDICT } from '../state.js';
+import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, factLine } from '../ui.js';
 
 const enc = encodeURIComponent;
 
@@ -50,36 +50,41 @@ export function comparePage(q) {
   return { view: root, crumbs: breadcrumbs([{ label: 'Results', href: '#/results' }, { label: 'Compare' }]) };
 }
 
-/* ---------- Review queue ---------- */
+/* ---------- Review queue: every verdict is accepted or overridden by a person ---------- */
+const vText = (v) => (VERDICT[v] || { label: String(v) }).label;
 export function reviewPage(q) {
-  const queue = findings().filter((f) => f.needs_human_review);
+  // items that need review come first, report order otherwise
+  const queue = findings().slice().sort((a, b) => Number(!!b.needs_human_review) - Number(!!a.needs_human_review));
   const root = h('div', { class: 'page', 'data-title': 'Review' });
   const crumbs = breadcrumbs([{ label: 'Results', href: '#/results' }, { label: 'Review queue' }]);
   root.append(h('h1', {}, 'Review queue'));
   if (!queue.length) {
-    root.append(h('div', { class: 'empty' }, h('div', { class: 'ic', 'aria-hidden': 'true' }, '✓'), h('h2', {}, 'Nothing needs review'), h('a', { class: 'btn primary', href: '#/summary' }, 'Open the Summary')));
+    root.append(h('div', { class: 'empty' }, h('h2', {}, 'Nothing to review'), h('a', { class: 'btn primary', href: '#/summary' }, 'Open the Summary')));
     return { view: root, crumbs };
   }
   let idx = queue.findIndex((f) => f.id === q.get('id'));
   if (idx < 0) idx = Math.max(0, parseInt(q.get('i') || '0', 10) || 0);
   if (idx >= queue.length) idx = queue.length - 1;
   const f = queue[idx];
-  const done = () => queue.filter((x) => (decisions()[x.id] || {}).decision).length;
+  const done = () => queue.filter((x) => reviewStatus(x) !== 'pending').length;
+  const over = () => queue.filter((x) => reviewStatus(x) === 'overridden').length;
   const prog = h('p', { role: 'status', class: 'muted' });
   const bar = h('div', { class: 'progress', 'aria-hidden': 'true' }, h('i'));
-  const upd = () => { prog.textContent = done() + ' of ' + queue.length + ' reviewed. Showing item ' + (idx + 1) + '.'; bar.firstChild.style.width = (100 * done() / queue.length) + '%'; };
+  const upd = () => { prog.textContent = done() + ' of ' + queue.length + ' reviewed, ' + over() + ' overridden. Showing item ' + (idx + 1) + '.'; bar.firstChild.style.width = (100 * done() / queue.length) + '%'; };
   upd();
   const last = idx === queue.length - 1;
   root.append(prog, bar, h('section', { class: 'card' },
     h('div', { class: 'row' }, verdictBadge(f), flagChips(f), h('span', { class: 'chip' }, f.id)),
     h('h2', { style: 'margin-top:8px' }, f.claim_text),
+    ...claimFacts(f),
     hasNumber(f) ? h('p', {}, h('b', {}, headlineText(f)), ' (' + pct(f.evidence.n_samples, f.evidence.denominator) + ')  ', h('a', { href: '#/claim/' + enc(f.id) }, 'See the calculation')) : h('p', { class: 'muted' }, 'No number for this item. ', h('a', { href: '#/claim/' + enc(f.id) }, 'Open the full finding')),
-    h('p', {}, h('b', {}, 'Why it needs review: '), f.review_reason || 'No reason given.'),
+    f.needs_human_review ? h('p', {}, h('b', {}, 'Why it needs review: '), f.review_reason || 'No reason given.') : null,
     h('div', { class: 'limit' }, h('h2', {}, 'Limitation'), h('p', { style: 'margin:0' }, f.limitation || 'None given.')),
-    decisionBlock(f, upd)),
+    reviewBlock(f, upd)),
     h('div', { class: 'pager' },
       idx > 0 ? h('a', { class: 'btn', href: '#/review?i=' + (idx - 1) }, '← Previous') : h('span'),
-      last ? h('a', { class: 'btn primary', href: '#/summary' }, 'Finish and open Summary') : h('a', { class: 'btn primary', href: '#/review?i=' + (idx + 1) }, 'Next →')));
+      last ? h('a', { class: 'btn primary', href: '#/summary' }, 'Finish and open Summary') : h('a', { class: 'btn primary', href: '#/review?i=' + (idx + 1) }, 'Next →')),
+    h('section', { class: 'card' }, h('h2', {}, 'Export'), h('p', { class: 'muted' }, 'review.json keeps the original verdict and the reviewer verdict side by side.'), exportButtons()));
   return { view: root, crumbs };
 }
 
@@ -91,20 +96,19 @@ export function summaryPage() {
   root.append(h('h1', {}, 'Summary'),
     h('p', { class: 'muted' }, (d.report_title || 'Report') + ' | ' + ((d.data_release && d.data_release.name) || 'unknown release') + ' | source ' + state.source + (d.is_mock ? ' | SAMPLE DATA' : '')),
     h('div', { class: 'row no-print', style: 'margin-bottom:16px' },
-      h('button', { class: 'btn primary', type: 'button', onclick: () => window.print() }, 'Print this page'),
-      h('button', { class: 'btn', type: 'button', onclick: () => {
-        const url = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }));
-        const a = h('a', { href: url, download: 'findings.json' }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-      } }, 'Download findings JSON')),
-    h('section', { class: 'card' }, h('h2', {}, 'Counts'), h('p', {}, all.length + ' claims. ' + n('supported') + ' supported, ' + n('contradicted') + ' contradicted, ' + n('insufficient_evidence') + ' insufficient evidence, ' + all.filter((x) => x.needs_human_review).length + ' need review, ' + all.filter(isBlocked).length + ' blocked.')));
-  const rev = all.filter((x) => x.needs_human_review);
+      h('button', { class: 'btn primary', type: 'button', onclick: () => window.print() }, 'Print this page'), exportButtons()),
+    h('section', { class: 'card' }, h('h2', {}, 'Counts'), h('p', {}, all.length + ' claims. ' + n('supported') + ' supported, ' + n('contradicted') + ' contradicted, ' + n('insufficient_evidence') + ' insufficient evidence, ' + all.filter((x) => x.needs_human_review).length + ' need review, ' + all.filter(isBlocked).length + ' blocked. '
+      + all.filter((x) => reviewStatus(x) === 'overridden').length + ' verdicts overridden by a reviewer.')));
   root.append(h('section', { class: 'card' }, h('h2', {}, 'Review decisions'),
-    rev.length ? h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Claim', 'Decision', 'Note'].map((t) => h('th', { scope: 'col' }, t)))),
-      h('tbody', {}, rev.map((f) => { const x = dec[f.id] || {}; return h('tr', {}, h('td', {}, h('a', { href: '#/claim/' + enc(f.id) }, f.id), ' ' + f.claim_text), h('td', {}, x.decision ? DECISION_TEXT[x.decision] : 'Not reviewed yet'), h('td', {}, x.note || '')); }))))
-      : h('p', { class: 'muted' }, 'No claims needed review.'),
+    h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Claim', 'Original verdict', 'Reviewer verdict', 'Status', 'Note'].map((t) => h('th', { scope: 'col' }, t)))),
+      h('tbody', {}, all.map((f) => { const x = dec[f.id] || {}, st = reviewStatus(f);
+        return h('tr', { class: st === 'overridden' ? 'overridden' : null }, h('td', {}, h('a', { href: '#/claim/' + enc(f.id) }, f.id), ' ' + f.claim_text),
+          h('td', {}, vText(f.verdict)), h('td', {}, st === 'pending' || st === 'more_evidence_requested' ? 'none' : vText(x.verdict || f.verdict)),
+          h('td', {}, st === 'overridden' ? '⚑ Overridden' : st === 'accepted' ? '✓ Accepted' : st === 'more_evidence_requested' ? 'More evidence requested' : 'Not reviewed yet'), h('td', {}, x.note || '')); })))),
     h('a', { class: 'btn no-print', href: '#/review' }, 'Open the review queue')));
   root.append(h('section', { class: 'card' }, h('h2', {}, 'All claims and limitations'),
     all.map((f) => h('div', { style: 'margin-bottom:14px;break-inside:avoid' }, h('div', { class: 'row' }, verdictBadge(f), h('b', {}, f.id), headlineText(f) ? h('span', {}, headlineText(f)) : null), h('div', {}, f.claim_text),
+      factLine(f) ? h('div', {}, factLine(f)) : null,
       h('div', { class: 'muted' }, 'Limitation: ' + (f.limitation || 'none given'))))));
   root.append(h('section', { class: 'card' }, h('h2', {}, 'All next actions'),
     all.some((f) => f.next_actions.length) ? all.filter((f) => f.next_actions.length).map((f) => h('div', {}, h('h3', {}, f.id + ': ' + f.claim_text), h('ul', {}, f.next_actions.map((a) => h('li', {}, a)))))

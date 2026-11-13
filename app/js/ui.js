@@ -1,5 +1,5 @@
-import { h, sv, pct, fmtNum } from './util.js';
-import { VERDICT, FLAG_TEXT, isBlocked, cannotAnswer, hasNumber, decisions, decide, DECISION_TEXT, minGroup, minEvents } from './state.js';
+import { h, sv, pct, fmtNum, toast } from './util.js';
+import { VERDICT, FLAG_TEXT, isBlocked, cannotAnswer, hasNumber, decisions, decide, reviewStatus, reviewJson, state, dataUrl, minGroup, minEvents } from './state.js';
 
 export function verdictBadge(f) {
   if (isBlocked(f)) return h('span', { class: 'badge v-blocked' }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '⛔'), 'Blocked');
@@ -9,6 +9,7 @@ export function verdictBadge(f) {
 export function flagChips(f) {
   const out = f.guardrail_flags.map((x) => h('span', { class: 'chip ' + (x === 'low_event_count' ? 'warn' : 'block') }, FLAG_TEXT[x] || x));
   if (f.needs_human_review) out.push(h('span', { class: 'chip review' }, 'Needs review'));
+  const rc = reviewChip(f); if (rc) out.push(rc);
   return out;
 }
 export function headlineText(f) {
@@ -54,27 +55,83 @@ export function breakdownChart(rows) {
     h('p', { class: 'muted bk-note' }, 'Dashed line: minimum group size (' + mg + ' samples). Marker: group under ' + mg + ' samples or ' + me + ' deaths.'));
 }
 
-// approve / reject / ask for more, saved in localStorage
-export function decisionBlock(f, onChange) {
+// Accept or override the machine verdict. Both verdicts are kept (see reviewJson in state.js).
+const vLabel = (v) => (VERDICT[v] || { label: String(v) }).label;
+export function reviewBlock(f, onChange) {
   const cur = decisions()[f.id] || {};
-  const status = h('span', { class: 'dec-saved', role: 'status' }, cur.decision ? 'Saved: ' + DECISION_TEXT[cur.decision] : '');
-  const note = h('textarea', { id: 'note-' + f.id, 'aria-label': 'Optional note', placeholder: 'Optional note' });
-  note.value = cur.note || '';
-  note.addEventListener('change', () => { decide(f.id, { note: note.value }); status.textContent = 'Note saved'; onChange && onChange(); });
-  const btn = (key, label) => {
-    const b = h('button', { class: 'btn', type: 'button', 'aria-pressed': String(cur.decision === key) }, label);
-    b.addEventListener('click', () => {
-      decide(f.id, { decision: key, note: note.value });
-      b.parentNode.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', 'false'));
-      b.setAttribute('aria-pressed', 'true');
-      status.textContent = 'Saved: ' + DECISION_TEXT[key];
-      onChange && onChange(key);
-    });
-    return b;
+  const status = h('p', { class: 'dec-saved', role: 'status' });
+  const activeKey = (st) => (st === 'accepted' ? 'approve' : st === 'overridden' ? 'reject' : st === 'more_evidence_requested' ? 'more' : '');
+  const show = () => {
+    const st = reviewStatus(f), c = decisions()[f.id] || {};
+    status.textContent = st === 'pending' ? 'Not reviewed yet.'
+      : st === 'overridden' ? 'Overridden. Original: ' + vLabel(f.verdict) + '. Reviewer: ' + vLabel(c.verdict) + '.'
+      : st === 'accepted' ? 'Accepted: ' + vLabel(f.verdict) + '.' : 'More evidence requested.';
+    group.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === activeKey(st))));
   };
+  const note = h('textarea', { id: 'note-' + f.id, placeholder: 'Optional note' });
+  note.value = cur.note || '';
+  note.addEventListener('change', () => { if (decisions()[f.id]) { decide(f.id, { note: note.value }); show(); onChange && onChange(); } });
+  const others = Object.keys(VERDICT).filter((v) => v !== f.verdict);
+  const pick = h('select', { id: 'rv-' + f.id }, others.map((v) => h('option', Object.assign({ value: v }, cur.verdict === v ? { selected: true } : {}), VERDICT[v].label)));
+  const save = (k, verdict) => { decide(f.id, { decision: k, verdict, note: note.value }); show(); onChange && onChange(k); };
+  const btn = (k, label, fn) => h('button', { class: 'btn', type: 'button', 'data-k': k, 'aria-pressed': 'false', onclick: fn }, label);
+  const group = h('div', { class: 'decision', role: 'group', 'aria-label': 'Review decision' },
+    btn('approve', 'Accept ' + vLabel(f.verdict), () => save('approve', f.verdict)),
+    btn('reject', 'Override with the verdict below', () => save('reject', pick.value)),
+    btn('more', 'Ask for more evidence', () => save('more', null)));
+  show();
   return h('div', {},
-    h('div', { class: 'decision', role: 'group', 'aria-label': 'Review decision' }, btn('approve', 'Approve'), btn('reject', 'Reject'), btn('more', 'Ask for more')),
-    h('label', { for: 'note-' + f.id, class: 'muted', style: 'font-size:.85rem' }, 'Note (optional)'), note, status);
+    h('p', { class: 'row' }, h('span', { class: 'muted' }, 'Original verdict:'), verdictBadge(f)),
+    group,
+    h('label', { for: 'rv-' + f.id, class: 'muted', style: 'font-size:.85rem;display:block' }, 'Override with this verdict'), pick,
+    h('label', { for: 'note-' + f.id, class: 'muted', style: 'font-size:.85rem;display:block;margin-top:8px' }, 'Note (optional)'), note, status);
+}
+export function reviewChip(f) {
+  const st = reviewStatus(f);
+  if (st === 'pending') return null;
+  const c = decisions()[f.id] || {};
+  if (st === 'overridden') return h('span', { class: 'chip over' }, '⚑ Overridden: ' + vLabel(f.verdict) + ' to ' + vLabel(c.verdict));
+  return h('span', { class: 'chip rev-ok' }, st === 'accepted' ? '✓ Accepted' : '? More evidence requested');
+}
+
+// Source sentence, correct value, missing evidence and sub-checks for one claim.
+export function claimFacts(f) {
+  const out = [];
+  const subs = f.sub_checks || (f.evidence && f.evidence.sub_checks) || [];
+  if (f.source_sentence) out.push(h('section', { class: 'card', 'aria-label': 'Source sentence' }, h('h2', {}, 'Source sentence'), h('blockquote', { class: 'src' }, f.source_sentence)));
+  if (f.correct_value && (f.correct_value.text || f.correct_value.value != null)) out.push(h('section', { class: 'card fact bad', 'aria-label': 'Correct value' }, h('h2', {}, 'Correct value from the data'),
+    h('p', { class: 'fact-v' }, f.correct_value.text || (f.correct_value.value + ' ' + (f.correct_value.unit || '')))));
+  if (f.missing_evidence) out.push(h('section', { class: 'card fact warn', 'aria-label': 'Missing evidence' }, h('h2', {}, 'Data that would be needed'), h('p', { style: 'margin:0' }, f.missing_evidence)));
+  if (subs.length) out.push(h('section', { class: 'card', 'aria-label': 'Parts of this sentence' }, h('h2', {}, 'This sentence has ' + subs.length + ' parts'),
+    h('ul', { class: 'subs' }, subs.map((s) => h('li', {}, verdictBadge({ verdict: s.verdict, guardrail_flags: [] }), h('span', {}, ' ' + s.claim),
+      s.value != null ? h('small', { class: 'muted' }, ' (' + fmtNum(s.n_samples) + ' of ' + fmtNum(s.denominator) + ')') : null)))));
+  return out;
+}
+export function factLine(f) {
+  if (f.correct_value && f.correct_value.text) return 'Correct value: ' + f.correct_value.text;
+  if (f.missing_evidence) return 'Needed: ' + f.missing_evidence;
+  return null;
+}
+
+// audit.json (server, or the precomputed demo file) and review.json (built here)
+export function saveBlob(text, name) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = h('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+export function exportButtons() {
+  const audit = h('button', { class: 'btn', type: 'button', onclick: async (ev) => {
+    const b = ev.currentTarget; b.disabled = true;
+    try {
+      let r;
+      if (state.mode === 'live' && state.reportText) r = await fetch('/api/audit-json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report: state.reportText, title: state.reportTitle || undefined }) });
+      else r = await fetch(dataUrl('out/audit.json'), { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      saveBlob(await r.text(), 'audit.json'); toast('audit.json downloaded');
+    } catch (e) { toast('audit.json is not available right now.'); }
+    b.disabled = false;
+  } }, 'Download audit.json');
+  const review = h('button', { class: 'btn', type: 'button', onclick: () => { saveBlob(JSON.stringify(reviewJson(), null, 2) + '\n', 'review.json'); toast('review.json downloaded'); } }, 'Download review.json');
+  return h('div', { class: 'row no-print' }, audit, review);
 }
 export { pct };
 

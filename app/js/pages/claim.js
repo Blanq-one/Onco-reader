@@ -1,6 +1,6 @@
 import { h, countUp, copyText, toast, fmtNum, fmtValue, pct } from '../util.js';
 import { state, findings, isBlocked, cannotAnswer, hasNumber, VERDICT, FLAG_TEXT } from '../state.js';
-import { verdictBadge, flagChips, caption, funnel, breakdownChart, decisionBlock, breadcrumbs } from '../ui.js';
+import { verdictBadge, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs } from '../ui.js';
 
 const enc = encodeURIComponent;
 
@@ -13,6 +13,7 @@ export function claimPage(f) {
   const arrow = (t, label, x) => x ? h('a', { class: 'btn', href: '#/claim/' + enc(x.id), 'aria-label': label + ': ' + x.claim_text }, t) : h('span', { class: 'btn', 'aria-disabled': 'true', style: 'opacity:.4' }, t);
   root.append(h('div', { class: 'pager no-print' }, arrow('← Previous', 'Previous claim', prev), h('span', { class: 'muted' }, 'Claim ' + (i + 1) + ' of ' + all.length), arrow('Next →', 'Next claim', next)));
   root.append(h('h1', {}, f.claim_text));
+  root.append(...claimFacts(f));
 
   // verdict / blocked / cannot answer
   if (isBlocked(f)) {
@@ -57,13 +58,13 @@ export function claimPage(f) {
     f.next_actions.length ? h('ol', { class: 'actions' }, f.next_actions.map((a) => h('li', {}, a))) : h('p', { class: 'muted' }, 'No next actions were listed.')));
 
   // review
-  if (f.needs_human_review) root.append(h('section', { class: 'card', 'aria-labelledby': 'rh' }, h('h2', { id: 'rh' }, 'Needs review'),
-    h('p', {}, f.review_reason || 'No reason was given.'), decisionBlock(f)));
+  root.append(h('section', { class: 'card', 'aria-labelledby': 'rh' }, h('h2', { id: 'rh' }, f.needs_human_review ? 'Needs review' : 'Your review'),
+    f.needs_human_review ? h('p', {}, f.review_reason || 'No reason was given.') : null, reviewBlock(f)));
 
   const other = next || prev;
   root.append(h('div', { class: 'row no-print' },
     other ? h('a', { class: 'btn', href: '#/compare?a=' + enc(f.id) + '&b=' + enc(other.id) }, 'Compare with another claim') : null,
-    f.needs_human_review ? h('a', { class: 'btn', href: '#/review?id=' + enc(f.id) }, 'Review this') : null,
+    h('a', { class: 'btn', href: '#/review?id=' + enc(f.id) }, 'Review this'),
     h('a', { class: 'btn', href: '#/results' }, 'Back to Results')));
 
   return { view: root, crumbs: breadcrumbs([{ label: 'Results', href: '#/results' }, { label: f.id }]) };

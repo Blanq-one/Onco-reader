@@ -189,3 +189,15 @@ select { max-width: 100%; }
 .cmp-pick select { width: 100%; }
 td, th { overflow-wrap: anywhere; }
 th { overflow-wrap: normal; white-space: nowrap; }
+
+.chip.over { color: var(--bad); background: var(--bad-bg); border-color: var(--bad); font-weight: 700; }
+.chip.rev-ok { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
+tr.overridden td { background: var(--bad-bg); }
+blockquote.src { margin: 0; padding: var(--s2) var(--s3); border-left: 4px solid var(--accent); background: var(--surface2); border-radius: 6px; }
+.card.fact.bad { border-color: var(--bad); } .card.fact.warn { border-color: var(--warn); }
+.fact-v { font-size: 1.5rem; font-weight: 800; margin: 0; }
+.subs { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+.skips { list-style: none; margin: var(--s2) 0 0; padding: 0; display: grid; gap: var(--s2); }
+.skips li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s2); border-bottom: 1px solid var(--border); padding-bottom: var(--s2); }
+details.card summary { cursor: pointer; font-weight: 700; }
+table.ex td:first-child { width: 2.5em; color: var(--muted); }
