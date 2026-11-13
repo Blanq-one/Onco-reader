@@ -1,4 +1,4 @@
-r"""Evidence engine v1.1.3: turn report claims into checked findings (standard library only).
+r"""Evidence engine v1.2.0: turn report claims into checked findings (standard library only).
 
 Plain English: for each claim in a report it (1) runs the guardrail pre-check,
 (2) reads the claim as a small template, (3) computes the real numbers from the
@@ -76,7 +76,8 @@ except Exception:  # pragma: no cover
 CFG = {
     "most_threshold": 0.5,       # "most" / "majority" means more than 50 percent
     "nearly_all": 0.95,          # "nearly all" / "almost all" means at least 95 percent
-    "about_tolerance": 0.05,     # "about N percent" means within 5 points of N
+    "about_tolerance": 0.03,     # "about N percent" means within 3 points of N
+    "about_count_rel": 0.02,     # "about N samples" means within 2 percent of N (at least 1)
     "borderline_margin": 0.02,   # within 2 points of the threshold -> ask a person to review
     "min_population": 30,        # fewer samples than this is too thin to judge
     "min_events": 20,            # fewer OS events than this is too thin for survival comparisons
@@ -285,8 +286,89 @@ def split_claims(text):
     return [s.strip() for s in sentences if s.strip() and not s.lstrip().startswith("#")]
 
 
+ABBREV = ["e.g.", "i.e.", "vs.", "etc.", "approx.", "fig.", "al.", "no.", "dr.", "mr.", "ms.", "st."]
+RECOMMEND = re.compile(r"^(?:we|i|the authors?|authors?)\s+(?:recommend|suggest|propose|urge|advise|hope|believe|plan)\b|"
+                       r"\bfuture (?:work|studies|research)\b|^(?:it would be|it may be|it might be)\b", re.I)
+HEDGE_TAIL = re.compile(r",?\s*(?:which|that)\s+(?:suggests?|implies|indicates?|means|shows)\b.*$", re.I)
+CLINICAL_WORDS = re.compile(r"\b(respond\w*|response|benefit\w*|efficacy|effective\w*|therapy|treatment\w*|drug\w*|"
+                            r"chemotherap\w*|prognos\w*|surviv\w*|mortality|outcome\w*|improv\w*)\b", re.I)
+QUANT_WORDS = re.compile(r"\b(most|majority|all|every|each|nearly|almost|about|around|approximately|roughly|over|under|"
+                         r"more than|less than|fewer than|at least|at most|half|largest|smallest|most common|least common|"
+                         r"rarest|most frequent|only|none|enough|sufficient)\b|\d", re.I)
+
+
+def split_sentences(paragraph):
+    t = paragraph
+    for a in ABBREV:
+        t = re.sub(re.escape(a), lambda m: m.group(0).replace(".", "<dot>"), t, flags=re.I)
+    t = re.sub(r"(\d)\.(\d)", r"\1<dot>\2", t)
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(\[])", t)
+    return [p.replace("<dot>", ".").strip() for p in parts if p.strip()]
+
+
+def is_checkable(sentence):
+    if RECOMMEND.search(sentence):
+        return False, "a recommendation, not a factual claim"
+    s = sentence
+    mentions = (find_layers(s) or find_attr_mentions(s) or parse_filters(s)
+                or re.search(r"\b(?:primary )?tumou?rs?\b|\bsamples?\b|\bpatients?\b|\bcases?\b", s, re.I))
+    if CLINICAL_WORDS.search(s) and mentions:
+        return True, ""
+    if mentions and QUANT_WORDS.search(s):
+        return True, ""
+    return False, "no checkable number or data statement"
+
+
+def extract_claims(text):
+    """Return (claims, skipped). Numbered or bulleted lists are used as written; otherwise prose is split into sentences."""
+    lines = text.splitlines()
+    listed = []
+    for line in lines:
+        m = re.match(r"^\s*(?:\d+[.)]|[-*\u2022])\s+(.*\S)\s*$", line)
+        if m:
+            listed.append(m.group(1))
+    if listed:
+        return [{"text": c, "source": c} for c in listed], []
+    claims, skipped, paragraphs, cur = [], [], [], []
+    for line in lines:
+        st = line.strip()
+        if not st:
+            if cur:
+                paragraphs.append(" ".join(cur))
+                cur = []
+            continue
+        if st.startswith("#"):
+            continue
+        if re.match(r"^\*[^*].*[^*]\*$", st) or re.match(r"^_[^_].*[^_]_$", st):
+            skipped.append({"text": st, "reason": "an italic note, not a claim"})
+            continue
+        cur.append(st)
+    if cur:
+        paragraphs.append(" ".join(cur))
+    for par in paragraphs:
+        for sent in split_sentences(par):
+            ok, why = is_checkable(sent)
+            if not ok:
+                skipped.append({"text": sent, "reason": why})
+                continue
+            claim = HEDGE_TAIL.sub("", sent).strip().rstrip(",")
+            if not claim.endswith((".", "?", "!")):
+                claim += "."
+            claims.append({"text": claim, "source": sent})
+    return claims, skipped
+
+
+def normalize_claim_text(text):
+    t = re.sub(r"\bm?RNA(?:[- ]?seq)?(?:[- ]based)?\s+(?:intrinsic\s+)?subtypes?(?:\s+calls?)?", "PAM50 subtype", text, flags=re.I)
+    t = re.sub(r"\bPAM50\s+(?:subtype\s+)?calls?\b", "PAM50 subtype", t, flags=re.I)
+    t = re.sub(r"\bsubtype calls?\b", "PAM50 subtype", t, flags=re.I)
+    return t
+
+
 def find_layers(text):
     low = text.lower()
+    if re.search(r"\ball (?:five|5) (?:molecular |data )?layers?\b|\bfive (?:data |molecular )?layers\b", low):
+        return ["survival", "mutation", "copy_number", "rna", "protein"]
     found = []
     for name, pats in LAYER_WORDS.items():
         pos = [m.start() for p in pats for m in re.finditer(p, low)]
@@ -400,6 +482,14 @@ def parse_quantifier(text):
                 "roughly": "~", "nearly": "~", "almost": "~"}[word]
         return {"kind": "fraction", "comparator": comp, "threshold": pct / 100.0,
                 "reading": f"'{word} {pct:g} percent'" + (f" (within {int(CFG['about_tolerance'] * 100)} points)" if comp == "~" else "")}
+    m = re.search(r"(?<![\w.,])(?<!stage )(?<!grade )(\d[\d,]*)\s+(?:[\w+\-]+\s+){0,3}?" + NOUNS + r"\b(?!\s*(?:%|percent))", low)
+    if m:
+        n = float(m.group(1).replace(",", ""))
+        before = low[max(0, m.start() - 25):m.start()]
+        hedge = re.search(r"\b(about|around|approximately|roughly|nearly|almost|some)\s*$", before)
+        noun = m.group(2)
+        return {"kind": "count", "comparator": "~c" if hedge else "==", "threshold": n, "noun": noun,
+                "reading": ("'about " if hedge else "'exactly ") + f"{int(n)}' {noun}" + (" (within 2 percent)" if hedge else "")}
     for pat, comp, thr, reading in [
         (r"\b(nearly|almost) all\b", ">=", CFG["nearly_all"], f"'nearly all' means at least {int(CFG['nearly_all'] * 100)} percent"),
         (r"\b(less|fewer) than half\b", "<", 0.5, "'less than half' means under 50 percent"),
@@ -437,7 +527,13 @@ def parse_claim(text):
     comparison = bool(re.search(r"compar|large enough|enough|sufficient|adequate", low))
     analytic = re.search(r"\b(correlat\w*|associat\w*|predict\w*|caus\w*|relationship|risk factors?|impact\w*|effects?|differ\w*|linked to)\b", low)
     base = {"filters": filters, "conditions": c_layers, "cond_attrs": c_attrs, "quantifier": q,
-            "pop_code": code, "pop_label": pop_label, "events": events}
+            "pop_code": code, "pop_label": pop_label, "events": events,
+            "explicit_pop": bool(re.search(r"\bprimary\b|normal tissue|metasta", low))}
+    ext = re.search(r"\b(?:is|are)\s+the\s+(largest|biggest|most common|most frequent|smallest|rarest|least common)\b", low)
+    if ext and filters:
+        direction = "min" if ext.group(1) in ("smallest", "rarest", "least common") else "max"
+        return dict(base, type="extremum", attr=filters[0]["attr"], target_filter=filters[0], direction=direction,
+                    ext_word=ext.group(1))
     if analytic:
         known = list(OrderedDict.fromkeys([f["attr"] for f in filters] + recorded + c_attrs))
         if known:
@@ -446,6 +542,11 @@ def parse_claim(text):
                 "reason": "it asserts a relationship, effect or prediction, which this tool does not test, or it uses a field that is not loaded"}
     if recorded and not t_layers and not filters and comparison and q is None:
         return dict(base, type="readiness", attr=recorded[0])
+    if (q and q["kind"] == "count" and not t_layers and not recorded and not filters and not events
+            and re.search(r"\b(?:primary tumou?rs?|tumou?rs?|samples?|patients?|cases?)\b", low)
+            and re.search(r"\b(there (?:are|were)|has|have|had|contains?|includes?|comprises?|totals?|consists? of|release|cohort|dataset)\b", low)):
+        pop = "patients" if re.search(r"\bpatients?\b", low) else ("samples" if re.search(r"\bsamples?\b", low) else "primary")
+        return dict(base, type="popsize", pop=pop)
     if t_layers or recorded or (events and not filters) or (events and filters):
         return dict(base, type="measure", mode="targets", targets=t_layers, recorded=recorded)
     if filters:
@@ -509,6 +610,8 @@ def satisfied(q, value, count):
     t, c = q["threshold"], q["comparator"]
     if c == "~":
         return abs(value - t) <= CFG["about_tolerance"]
+    if c == "~c":
+        return abs(count - t) <= max(1, CFG["about_count_rel"] * t)
     return {"==": v == t, ">": v > t, ">=": v >= t, "<": v < t, "<=": v <= t}[c]
 
 
@@ -562,6 +665,7 @@ def blank_finding(fid, text):
                                    ("denominator", 0), ("source_files", []), ("calculation", "")])),
         ("cohort_trace", []), ("limitation", ""), ("needs_human_review", False), ("review_reason", None),
         ("guardrail_flags", []), ("next_actions", []), ("robustness", None),
+        ("correct_value", None), ("missing_evidence", None), ("source_sentence", None),
     ])
 
 
@@ -625,7 +729,7 @@ def run_guardrails(text):
         flags.append("reidentification_blocked")
     if re.search(r"tcga-[a-z0-9]{2}-[a-z0-9]{4}", low) and "reidentification_blocked" not in flags:
         flags.append("individual_level_request_blocked")
-    if re.search(r"improves survival|should receive|risk score|diagnos|which treatment|chemotherapy|prognos", low):
+    if re.search(r"improves survival|should receive|risk score|diagnos|which treatment|chemotherapy|prognos|respon\w*\b.*\b(therapy|treatment|drug)", low):
         flags.append("clinical_claim_blocked")
     return {"allowed": not flags, "flags": flags, "reason": ("Stopped by guardrails: " + ", ".join(flags)) if flags else ""}
 
@@ -691,7 +795,7 @@ def evaluate_claim(ctx, fid, text):
     guard = run_guardrails(text)
     if not guard["allowed"]:
         return blocked_finding(fid, text, guard["flags"], guard.get("reason") or "Stopped by guardrails.", total)
-    parsed = parse_claim(text)
+    parsed = parse_claim(normalize_claim_text(text))
     f = blank_finding(fid, text)
     f["evidence"]["denominator"] = total
     if parsed["type"] == "invalid":
@@ -711,6 +815,10 @@ def evaluate_claim(ctx, fid, text):
         return f
     if parsed["type"] == "readiness":
         return readiness_finding(ctx, f, parsed, total)
+    if parsed["type"] == "popsize":
+        return popsize_finding(ctx, f, parsed, total)
+    if parsed["type"] == "extremum":
+        return extremum_finding(ctx, f, parsed, total)
 
     # measure
     attr_keys = list(OrderedDict.fromkeys([x["attr"] for x in parsed["filters"]] + parsed["recorded"] + parsed["cond_attrs"]))
@@ -789,7 +897,7 @@ def evaluate_claim(ctx, fid, text):
     ev["calculation"] = calc + f". Claim read as: {q['reading']}."
     lead = value if q["kind"] == "fraction" else num
     reasons = []
-    if q["comparator"] != "~":
+    if q["comparator"] not in ("~", "~c") and not (q["kind"] == "count" and q["comparator"] == "=="):
         near = abs(lead - q["threshold"]) <= (CFG["borderline_margin"] if q["kind"] == "fraction" else 0)
         if near:
             reasons.append(f"The result sits {missing_text(q, lead)}.")
@@ -798,6 +906,13 @@ def evaluate_claim(ctx, fid, text):
     if low_events:
         reasons.append(f"Only {n_events} deaths remain, below {CFG['min_events']}, which is thin for survival comparisons.")
 
+    if f["verdict"] == "contradicted":
+        if q["kind"] == "fraction" and value is not None:
+            f["correct_value"] = {"value": round(value * 100, 1), "unit": "percent", "text": f"{value * 100:.1f}% ({num} of {den})"}
+        else:
+            unit = q.get("noun") or "samples"
+            f["correct_value"] = {"value": num, "unit": unit, "text": f"{num} {unit} ({num} of {den} {parsed['pop_label']})"}
+
     # robustness: one alternative reading of the same claim
     rob = None
     if parsed["mode"] == "group" and q["kind"] == "fraction" and len(pop_ids):
@@ -805,7 +920,8 @@ def evaluate_claim(ctx, fid, text):
         alt_ok = satisfied(q, alt_val, num)
         rob = {"alt_rule": "count samples with no recorded value in the denominator too",
                "alt_value": round(alt_val, 4), "verdict_changes": alt_ok != ok}
-    elif parsed["pop_code"] == "01" and len(ctx.all_samples) != len(pop_ids):
+    elif (parsed["pop_code"] == "01" and len(ctx.all_samples) != len(pop_ids) and not parsed["explicit_pop"]
+          and not (q["kind"] == "count" and q["comparator"] in ("==", "~c"))):
         a_steps, a_final = run_ops(ctx.all_samples, pop_ops + tgt_ops, "all samples")
         a_den = a_steps[len(pop_ops)]["n_after"]
         if a_den:
@@ -834,9 +950,180 @@ def evaluate_claim(ctx, fid, text):
     return f
 
 
-def audit(ctx, claims, title):
-    findings = [evaluate_claim(ctx, f"claim-{i:03d}", c) for i, c in enumerate(claims, 1)]
+def popsize_finding(ctx, f, parsed, total):
+    key = parsed["pop"]
+    if key == "samples":
+        n, label = len(ctx.all_samples), "samples in the release"
+    elif key == "patients":
+        n, label = len({L.patient_of(x) for x in ctx.all_samples}), "patients in the release"
+    else:
+        n, label = len(ctx.population("01")), "primary tumor samples"
+    q = parsed["quantifier"]
+    ok = satisfied(q, None, n)
+    f["evidence"].update({"metric_name": f"population_size_{key}", "value": n, "n_samples": n, "denominator": n,
+                          "source_files": ["sample_manifest.csv"],
+                          "calculation": f"{label}: {n}. Claim read as: {q['reading']}."})
+    f["cohort_trace"] = [{"step": label, "n_before": n, "n_after": n}]
+    f["verdict"] = "supported" if ok else "contradicted"
+    f["limitation"] = "Counts come from the release's sample list: one sample is one barcode, and one patient can have several samples."
+    if ok:
+        f["next_actions"] = ["State which sample types the count covers (primary tumor, normal tissue, metastasis) so readers can reproduce it."]
+    else:
+        f["correct_value"] = {"value": n, "unit": key, "text": f"{n} {label}"}
+        f["next_actions"] = [f"Restate the count as {n} {label}.", "Say which sample types the count covers."]
+    return f
+
+
+def extremum_finding(ctx, f, parsed, total):
+    key, flt = parsed["attr"], parsed["target_filter"]
+    pop = ctx.population(parsed["pop_code"])
+    counts, deaths = Counter(), Counter()
+    for sid in pop:
+        v = ctx.attr(key, sid)
+        if v is None:
+            continue
+        counts[v] += 1
+        if ctx.os_event(sid) == 1:
+            deaths[v] += 1
+    if key not in ctx.attrs or not counts:
+        f["evidence"]["calculation"] = f"not run: no recorded {ATTR_SPECS[key]['label']} values were found"
+        f["limitation"] = "The data cannot answer this: the needed field is empty or missing."
+        f["guardrail_flags"] = ["data_cannot_answer"]
+        f["next_actions"] = ["Check whether the field exists under another name in the clinical file."]
+        return f
+    recorded = sum(counts.values())
+    pick = min if parsed["direction"] == "min" else max
+    extreme_n = pick(counts.values())
+    leaders = [g for g, n in counts.items() if n == extreme_n]
+    x_groups = [g for g in counts if flt["test"](g)]
+    shown = "; ".join(f"{ctx.display_name(key, g)} {n}" for g, n in counts.most_common())
+    breakdown = [{"group": ctx.display_name(key, g), "n": n, "events": deaths.get(g, 0)} for g, n in counts.most_common()]
+    word = parsed["ext_word"]
+    leader_txt = ", ".join(ctx.display_name(key, g) for g in leaders)
+    if not x_groups:
+        f["evidence"].update({"metric_name": f"extremum_{key}", "value": None, "n_samples": 0, "denominator": recorded,
+                              "source_files": ["clinical.tsv", "sample_manifest.csv"], "breakdown": breakdown,
+                              "calculation": f"{flt['label']} does not occur among the {recorded} recorded {ATTR_SPECS[key]['label']} values: {shown}."})
+        f["limitation"] = "The group named in the claim was not found in the data."
+        f["guardrail_flags"] = ["data_cannot_answer"]
+        f["next_actions"] = ["Check the group name against the values in the data: " + shown + "."]
+        return f
+    ok = all(g in leaders for g in x_groups)
+    x_n = sum(counts[g] for g in x_groups)
+    f["evidence"].update({"metric_name": f"extremum_{key}", "value": x_n, "n_samples": x_n, "denominator": recorded,
+                          "source_files": ["clinical.tsv", "sample_manifest.csv"], "breakdown": breakdown,
+                          "calculation": (f"Groups of {ATTR_SPECS[key]['label']} among {parsed['pop_label']} with it recorded "
+                                          f"({recorded} of {len(pop)}): {shown}. The {'smallest' if parsed['direction'] == 'min' else 'largest'} "
+                                          f"group is {leader_txt} ({extreme_n} of {recorded}). Claim: {flt['label']} is the {word}. "
+                                          f"{attr_used_text(ctx, [key])}.")})
+    f["cohort_trace"] = [{"step": parsed["pop_label"], "n_before": len(pop), "n_after": len(pop)},
+                         {"step": f"has {ATTR_SPECS[key]['label']} recorded", "n_before": len(pop), "n_after": recorded}]
+    f["limitation"] = limitation_for(parsed, [])
+    f["verdict"] = "supported" if ok else "contradicted"
+    if ok:
+        f["next_actions"] = ["Check data quality inside the field, not just counts, before relying on the ranking."]
+    else:
+        f["correct_value"] = {"value": extreme_n, "unit": "samples",
+                              "text": f"The {'smallest' if parsed['direction'] == 'min' else 'largest'} group is {leader_txt} ({extreme_n} of {recorded}); "
+                                      f"{flt['label']} has {x_n} of {recorded}"}
+        f["next_actions"] = [f"Restate the claim: {leader_txt} is the {'smallest' if parsed['direction'] == 'min' else 'largest'} group."]
+    return f
+
+
+def split_subclaims(text):
+    """Split one sentence into the separate checks it contains (kept small and explicit)."""
+    t = text.strip()
+    m = re.match(r"^Of the (?P<M>\d[\d,]*) (?P<pop>[\w\s-]+?)(?: in [^,]*)?,\s*(?P<N>\d[\d,]*)\s+(?P<rest>(?:have|had|has|carry|show|with)\b.*)$", t, re.I)
+    if not m:
+        m = re.match(r"^(?P<N>\d[\d,]*) of the (?P<M>\d[\d,]*) (?P<pop>[^,]+?)(?: in [^,]*?)?\s+(?P<rest>(?:have|had|has)\b.*)$", t, re.I)
+    if m:
+        pop = m.group("pop").strip()
+        return [f"There are {m.group('M')} {pop}.", f"{m.group('N')} {pop} {m.group('rest').strip()}"]
+    m = re.match(r"^(?:there (?:are|were)|the release (?:has|contains)|it (?:has|contains))\s+(?P<a>\d[\d,]*)\s+samples?\s+(?:from|across|belonging to|representing)\s+(?P<b>\d[\d,]*)\s+patients?\b", t, re.I)
+    if m:
+        return [f"There are {m.group('a')} samples.", f"There are {m.group('b')} patients."]
+    m = re.match(r"^(?P<subj>.+?)\s+(?:is|are)\s+the\s+(?P<ext>largest|biggest|most common|most frequent|smallest|rarest|least common)"
+                 r"(?P<what>[^,]*?),\s*(?:accounting for|making up|representing|comprising|constituting|which (?:accounts for|makes up|represents))\s+(?P<tail>.+)$", t, re.I)
+    if m:
+        return [f"{m.group('subj')} is the {m.group('ext')}{m.group('what')}.", f"{m.group('subj')} accounts for {m.group('tail').strip()}"]
+    return [t]
+
+
+VERDICT_RANK = {"supported": 1, "insufficient_evidence": 2, "contradicted": 3}
+CLINICAL_MISSING = ("Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, "
+                    "survival times, and molecular layers, but no treatment or response data.")
+
+
+def combine_parts(parts, text):
+    import copy
+    worst = parts[0]
+    for part in parts:
+        if VERDICT_RANK[part["verdict"]] >= VERDICT_RANK[worst["verdict"]]:
+            worst = part
+    f = copy.deepcopy(worst)
+    f["claim_text"] = text
+    f["verdict"] = worst["verdict"]
+    f["evidence"]["calculation"] = " | ".join(p["evidence"]["calculation"] for p in parts if p["evidence"]["calculation"])
+    f["evidence"]["sub_checks"] = [{"claim": p["claim_text"], "verdict": p["verdict"], "value": p["evidence"]["value"],
+                                    "n_samples": p["evidence"]["n_samples"], "denominator": p["evidence"]["denominator"]} for p in parts]
+    f["guardrail_flags"] = list(OrderedDict.fromkeys(fl for p in parts for fl in p["guardrail_flags"]))
+    f["needs_human_review"] = any(p["needs_human_review"] for p in parts)
+    reasons = [p["review_reason"] for p in parts if p["review_reason"]]
+    f["review_reason"] = " ".join(OrderedDict.fromkeys(reasons)) if reasons else None
+    if f["needs_human_review"] and not f["review_reason"]:
+        f["review_reason"] = "At least one part of this claim needs a person to look at it."
+    f["next_actions"] = list(OrderedDict.fromkeys(a for p in parts for a in p["next_actions"]))
+    f["limitation"] = " ".join(OrderedDict.fromkeys(p["limitation"] for p in parts if p["limitation"]))
+    wrong = [p["correct_value"]["text"] for p in parts if p["verdict"] == "contradicted" and p.get("correct_value")]
+    f["correct_value"] = ({"value": next(p["correct_value"]["value"] for p in parts if p["verdict"] == "contradicted" and p.get("correct_value")),
+                           "unit": "mixed" if len(wrong) > 1 else next(p["correct_value"]["unit"] for p in parts if p["verdict"] == "contradicted" and p.get("correct_value")),
+                           "text": "; ".join(wrong)} if wrong else None)
+    return f
+
+
+def finalize_finding(f, source):
+    f["source_sentence"] = f["claim_text"] if REDACT_FLAGS & set(f["guardrail_flags"]) else source
+    if f["verdict"] == "insufficient_evidence" and not f.get("missing_evidence"):
+        flags = set(f["guardrail_flags"])
+        if "clinical_claim_blocked" in flags:
+            f["missing_evidence"] = CLINICAL_MISSING
+        elif "data_cannot_answer" in flags:
+            f["missing_evidence"] = (f["limitation"].replace("The data cannot answer this: ", "").rstrip(".") +
+                                     ". A data field that covers this question would be needed.")
+        elif flags & {"individual_level_request_blocked", "reidentification_blocked", "phi_like_input", "prompt_injection_suspected"}:
+            f["missing_evidence"] = "Not applicable: this tool answers cohort-level data-readiness questions only."
+        elif "invalid_input" in flags:
+            f["missing_evidence"] = "A well-formed claim with a valid number."
+        else:
+            f["missing_evidence"] = f["review_reason"] or "A measurable threshold or a defined comparison for the claim."
+    return f
+
+
+def evaluate_item(ctx, fid, item):
+    text = item["text"] if isinstance(item, dict) else item
+    source = item.get("source", text) if isinstance(item, dict) else text
+    subs = split_subclaims(text)
+    if len(subs) == 1:
+        f = evaluate_claim(ctx, fid, text)
+    else:
+        guard = run_guardrails(text)
+        if not guard["allowed"]:
+            total = len(ctx.population("01")) or len(ctx.all_samples)
+            f = blocked_finding(fid, text, guard["flags"], guard.get("reason") or "Stopped by guardrails.", total)
+        else:
+            f = combine_parts([evaluate_claim(ctx, fid, sub) for sub in subs], text)
+    return finalize_finding(f, source)
+
+
+def audit(ctx, claims, title, skipped=None):
+    findings = [evaluate_item(ctx, f"claim-{i:03d}", c) for i, c in enumerate(claims, 1)]
     doc = _build_document(ctx, findings, title)
+    if skipped:
+        kept = []
+        for sk in skipped:
+            g = run_guardrails(sk["text"]) if (_check_claim is not None or ALLOW_FALLBACK) else {"allowed": False}
+            kept.append({"text": sk["text"] if g.get("allowed") else "[withheld]", "reason": sk["reason"]})
+        doc["skipped_sentences"] = kept
     if not ALLOW_FALLBACK:
         if _check_document is None:
             raise RuntimeError("src/guardrails post-check (check_document) is missing or failed to import")
@@ -858,12 +1145,13 @@ def _build_document(ctx, findings, title):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Evidence engine v1.1.3")
+    ap = argparse.ArgumentParser(description="Evidence engine v1.2.0")
     ap.add_argument("--data-dir", default=L.DEFAULT_DIR)
     ap.add_argument("--report", help="text or markdown file with numbered or bulleted claims")
     ap.add_argument("--claim", action="append", default=[], help="a single claim (can repeat)")
     ap.add_argument("--out", default=os.path.join("out", "findings.json"))
     ap.add_argument("--notes", action="store_true", help="print which clinical columns were chosen")
+    ap.add_argument("--extract-only", action="store_true", help="show which sentences would be checked and which skipped, then stop")
     ap.add_argument("--unsafe-no-guardrails", action="store_true",
                     help="use the small built-in rules if src/guardrails is missing (quick local tests only, never for submission)")
     ap.add_argument("--column", action="append", default=[],
@@ -882,11 +1170,20 @@ def main(argv=None):
         ALLOW_FALLBACK = True
         GUARDRAILS_SOURCE = "built-in fallback (limited, NOT for submission)"
         print("WARNING: running without the real guardrails module.", file=sys.stderr)
-    claims, title = list(args.claim), "Ad hoc claims"
+    claims, title, skipped = list(args.claim), "Ad hoc claims", []
     if args.report:
         with open(args.report, encoding="utf-8") as fh:
-            claims += split_claims(fh.read())
+            extracted, skipped = extract_claims(fh.read())
+        claims += extracted
         title = os.path.basename(args.report)
+        if args.extract_only:
+            print(f"\nWould check {len(extracted)} claim(s):")
+            for i, c in enumerate(extracted, 1):
+                print(f"  {i}. {c['text']}")
+            print(f"\nSkipped {len(skipped)} sentence(s):")
+            for sk in skipped:
+                print(f"  - ({sk['reason']}) {sk['text'][:100]}")
+            return
     if not claims:
         sys.exit("give --report FILE or at least one --claim TEXT")
     if not os.path.isdir(args.data_dir):
@@ -899,7 +1196,7 @@ def main(argv=None):
         overrides[k] = v
     ctx = Context(args.data_dir, overrides)
     try:
-        doc = audit(ctx, claims, title)
+        doc = audit(ctx, claims, title, skipped)
     except PostCheckError as err:
         print("Refusing to write output: the guardrails post-check found problems.", file=sys.stderr)
         for problem in err.problems:
