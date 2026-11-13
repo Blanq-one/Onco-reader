@@ -285,4 +285,6 @@ Raw TCGA files are never committed. They stay in `../challenge-ref`, which is re
 - **Our code:** the Python standard library only (Python Software Foundation License). The frontend uses no third-party libraries.
 - **pypdf** (BSD-3-Clause, optional): used only by `POST /api/pdf-text` when installed. Without it, that endpoint answers 501 and you paste the text instead.
 - **jsonschema** (MIT, optional): used only by the organizers' validator, `challenge-ref/format/validate.py`. That includes the steps of `scripts/fresh_clone_check.py` that run the validator. Our code does not import it.
+- **pandas** (BSD-3-Clause, optional, tests only): `tests/test_engine_claims.py` recomputes the engine's numbers with pandas on the real data, as an independent check. Those tests skip without it.
+- **Node.js** (MIT, optional, tests only): `tests/test_app_review_guard.py` runs the app's review rule (`app/js/state.js`) with Node. It skips without it.
 - **Data:** TCGA-BRCA from the UCSC Xena hub, and curated survival from the TCGA Pan-Cancer Clinical Data Resource. Both are fetched by the organizers' script and never committed here. Terms and required citations are in `challenge-ref/DATA_LICENSES.md`.
