@@ -467,6 +467,7 @@ def parse_filters(text):
 
 NUM = r"(\d[\d,]*(?:\.\d+)?)"
 NOUNS = r"(samples?|patients?|tumou?rs?|cases?|deaths?|events?)"
+COUNT_NOUN = r"(samples?|patients?|tumou?rs?|cases?|slides?|sections?|metastas[ie]s)"  # things a report counts
 COUNT_WORDS = OrderedDict([("fewer than", "<"), ("less than", "<"), ("under", "<"), ("below", "<"), ("more than", ">"),
                            ("over", ">"), ("above", ">"), ("at least", ">="), ("at most", "<="), ("up to", "<="), ("exactly", "==")])
 HEDGE_WORDS = r"about|around|approximately|roughly|nearly|almost|some"
@@ -523,12 +524,47 @@ def parse_slide_count(text):
             kind = "frozen"
     n = float(m.group(1).replace(",", ""))
     noun = "slides" if m.group(3).startswith("slide") else "sections"
+    rq = parse_range(low)
+    if rq and rq["kind"] == "count":
+        return {"slide_kind": kind, "quantifier": dict(rq, noun=noun, reading=rq["reading"].replace("' samples", "' " + noun))}
     return {"slide_kind": kind, "quantifier": count_quantifier(low, m.start(1), n, noun)}
+
+
+PCT = r"\s*(?:%|percent|per cent)"
+RANGE_PCT = [re.compile(r"\b(?:between|from)\s+" + NUM + r"(?:" + PCT + r")?\s*(?:and|to|-|\u2013)\s*" + NUM + PCT),
+             re.compile(r"(?<![\w.,])" + NUM + r"(?:" + PCT + r")?\s*(?:-|\u2013|to)\s*" + NUM + PCT)]
+RANGE_COUNT = [re.compile(r"\b(?:between|from)\s+" + NUM + r"\s*(?:and|to|-|\u2013)\s*" + NUM + r"(?![\d,.]|" + PCT + r")"
+                          r"(?:\s+(?:[\w+\-]+\s+){0,3}?" + COUNT_NOUN + r"\b)?"),
+               re.compile(r"(?<![\w.,])" + NUM + r"\s*(?:-|\u2013|to)\s*" + NUM + r"(?![\d,.]|" + PCT + r")\s+(?:[\w+\-]+\s+){0,3}?"
+                          + COUNT_NOUN + r"\b")]
+
+
+def parse_range(low):
+    """'between 40% and 50%', '40-50 percent', 'from 500 to 600 samples' -> an inclusive range quantifier, or None."""
+    for rx in RANGE_PCT:
+        m = rx.search(low)
+        if m:
+            lo, hi = sorted(float(m.group(i).replace(",", "")) for i in (1, 2))
+            if hi > 100:
+                return {"kind": "invalid", "reading": f"{hi:g} percent is outside 0 to 100"}
+            return {"kind": "fraction", "comparator": "range", "threshold": lo / 100.0, "high": hi / 100.0,
+                    "reading": f"'between {lo:g} and {hi:g} percent' (both ends included)"}
+    for rx in RANGE_COUNT:
+        m = rx.search(low)
+        if m:
+            lo, hi = sorted(float(m.group(i).replace(",", "")) for i in (1, 2))
+            noun = m.group(3) or "samples"
+            return {"kind": "count", "comparator": "range", "threshold": lo, "high": hi, "noun": noun,
+                    "reading": f"'between {int(lo)} and {int(hi)}' {noun} (both ends included)"}
+    return None
 
 
 def parse_quantifier(text):
     """Return dict(kind, comparator, threshold, reading) or None. May return kind 'invalid'."""
     low = text.lower().replace("\u2019", "'")
+    rq = parse_range(low)
+    if rq:
+        return rq
     if re.search(r"(?:^|[\s(])[-\u2212]\s*\d[\d,]*(?:\.\d+)?\s*(?:%|percent|samples?|patients?|tumou?rs?|cases?|deaths?|events?)", low):
         return {"kind": "invalid", "reading": "a negative number cannot describe a count or a share"}
     m = re.search(r"\b(fewer than|less than|under|below|more than|over|above|at least|at most|up to|exactly)\s+" + NUM +
@@ -693,6 +729,8 @@ def run_ops(ids, ops, start_label):
 def satisfied(q, value, count):
     v = value if q["kind"] == "fraction" else count
     t, c = q["threshold"], q["comparator"]
+    if c == "range":  # both ends included
+        return t <= v <= q["high"]
     if c == "~":
         return abs(value - t) <= CFG["about_tolerance"]
     if c == "~c":
@@ -700,9 +738,20 @@ def satisfied(q, value, count):
     return {"==": v == t, ">": v > t, ">=": v >= t, "<": v < t, "<=": v <= t}[c]
 
 
+def range_edges(q):
+    """The ends of a range a result can sit close to; 0% and 100% are left out, since nothing lies beyond them."""
+    return [b for b in (q["threshold"], q["high"]) if not (q["kind"] == "fraction" and b in (0.0, 1.0))]
+
+
 def missing_text(q, lead):
     """Plain wording for how far a result sits from the claim's bar."""
     t = q["threshold"]
+    if q.get("comparator") == "range":
+        edge = min(range_edges(q) or (t, q["high"]), key=lambda b: abs(lead - b))
+        end = "upper" if edge == q["high"] else "lower"
+        if q["kind"] == "count":
+            return f"{abs(int(lead - edge))} from the {end} end of the range ({int(edge)})"
+        return f"{abs(lead - edge) * 100:.1f} points from the {end} end of the range ({edge * 100:g}%)"
     if q["kind"] == "count":
         gap = lead - t
         return f"{abs(int(gap))} {'above' if gap > 0 else 'below'} the bar of {int(t)}"
@@ -985,7 +1034,8 @@ def evaluate_claim(ctx, fid, text):
     lead = value if q["kind"] == "fraction" else num
     reasons = []
     if q["comparator"] not in ("~", "~c") and not (q["kind"] == "count" and q["comparator"] == "=="):
-        near = abs(lead - q["threshold"]) <= (CFG["borderline_margin"] if q["kind"] == "fraction" else 0)
+        edges = [q["threshold"]] if q["comparator"] != "range" else range_edges(q)
+        near = bool(edges) and min(abs(lead - b) for b in edges) <= (CFG["borderline_margin"] if q["kind"] == "fraction" else 0)
         if near:
             reasons.append(f"The result sits {missing_text(q, lead)}.")
     if not ok and q["comparator"] in ("==", ">=", ">") and q["kind"] == "fraction" and den - num > 0 and q["comparator"] == "==":
@@ -1207,7 +1257,6 @@ def split_subclaims(text):
     return split_counts(t) or [t]
 
 
-COUNT_NOUN = r"(samples?|patients?|tumou?rs?|cases?|slides?|sections?|metastas[ie]s)"
 RANGE_WORDS = re.compile(r"\bbetween\s+[\d,.]+\s*(?:%|percent)?\s*and\s+\d|\bfrom\s+[\d,.]+\s*(?:%|percent)?\s*to\s+\d|\d\s*(?:-|–|to)\s*\d")
 COUNT_VERB = re.compile(r"\b(?:are|is|were|was|have|has|had|holds?|contains?|includes?|comprises?|exist|number|total)\b", re.I)
 

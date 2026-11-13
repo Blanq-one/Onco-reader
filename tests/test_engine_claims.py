@@ -51,6 +51,8 @@ PRIMARY = [_bc(i) for i in range(1, 41)]                      # 40 primary tumor
 NORMAL = [_bc(i, "11") for i in (1, 2, 3, 4, 5)]               # 5 normal tissue samples
 METASTASIS = [_bc(i, "06") for i in (6, 7)]                    # 2 metastases
 SLIDE_KINDS = ["diagnostic (FFPE)"] * 12 + ["frozen, top section"] * 6 + ["frozen, bottom section"] * 3   # 21 slides
+# Gene-level mutation file: the first 30 primary tumors were profiled; 1 means mutated.
+MUTATIONS = {"PIK3CA": PRIMARY[:12], "TP53": PRIMARY[:10], "GATA3": PRIMARY[:4], "CDH1": PRIMARY[:2], "TTN": []}
 
 
 def write_release(folder, mutation_rows=None, er=None):
@@ -106,7 +108,7 @@ def cv_text(f):
 
 
 class SyntheticCase(unittest.TestCase):
-    mutation_rows = None
+    mutation_rows = MUTATIONS
 
     @classmethod
     def setUpClass(cls):
@@ -257,6 +259,64 @@ class TestSeveralCountsReal(RealCase):
         f = self.run_claim(f"Only {met} samples are metastases, and {normal + 1} are normal tissue.")
         self.assertEqual((f["verdict"], [p[1] for p in parts(f)]), ("contradicted", ["supported", "contradicted"]))
         self.assertIn(f"{normal} normal tissue samples", cv_text(f))
+
+
+# ---------- item 3: ranges ----------
+class TestRangesSynthetic(SyntheticCase):
+    # 30 of 40 primary tumors have mutation data (75%); 40 primary tumors; 12 diagnostic slides; 2 metastases
+
+    def test_percent_ranges(self):
+        for text, verdict in (("Between 70% and 80% of primary tumors have mutation data.", "supported"),
+                              ("From 70 to 80 percent of primary tumors have mutation data.", "supported"),
+                              ("70-80% of primary tumors have mutation data.", "supported"),
+                              ("Between 75% and 80% of primary tumors have mutation data.", "supported"),   # ends included
+                              ("Between 40% and 50% of primary tumors have mutation data.", "contradicted"),
+                              ("80 to 90 percent of primary tumors have mutation data.", "contradicted")):
+            f = check(self.ctx, text, self)
+            self.assertEqual(f["verdict"], verdict, text)
+            self.assertIn("both ends included", f["evidence"]["calculation"])
+            if verdict == "contradicted":
+                self.assertEqual(cv_text(f), "75.0% (30 of 40)")
+
+    def test_count_ranges(self):
+        self.assertEqual(self.verdict("From 25 to 35 primary tumors have mutation data."), "supported")
+        f = check(self.ctx, "Between 31 and 35 primary tumors have mutation data.", self)
+        self.assertEqual((f["verdict"], f["correct_value"]["value"]), ("contradicted", 30))
+        self.assertEqual(self.verdict("There are between 35 and 45 primary tumors."), "supported")
+        self.assertEqual(self.verdict("There are between 10 and 15 diagnostic slides."), "supported")
+        self.assertEqual(self.verdict("Between 3 and 5 samples are metastases."), "contradicted")
+
+    def test_a_range_is_never_read_as_one_number_or_a_negative(self):
+        q = E.parse_quantifier("From 25 to 35 primary tumors have mutation data.")
+        self.assertEqual((q["comparator"], q["threshold"], q["high"]), ("range", 25, 35))
+        q = E.parse_quantifier("70 - 80% of primary tumors have mutation data.")
+        self.assertEqual((q["kind"], q["comparator"]), ("fraction", "range"))
+        self.assertEqual(E.parse_quantifier("Between 120% and 130% of tumors have RNA data.")["kind"], "invalid")
+
+    def test_near_an_end_asks_for_review_but_not_at_100_percent(self):
+        f = check(self.ctx, "Between 60% and 76% of primary tumors have mutation data.", self)
+        self.assertTrue(f["needs_human_review"])
+        self.assertIn("upper end of the range", f["review_reason"])
+        f = check(self.ctx, "Between 90% and 100% of primary tumors have survival data.", self)  # 100%: at the 100% end only
+        self.assertEqual(f["verdict"], "supported")
+        self.assertFalse(f["needs_human_review"])
+
+
+class TestRangesReal(RealCase):
+    def test_ranges_match_pandas(self):
+        m = self.manifest[self.manifest.sample_id.str[13:15] == "01"]
+        layers = ["has_survival", "has_mutation", "has_copy_number", "has_rna", "has_protein"]
+        n = int(m[layers].all(axis=1).sum())
+        share = n / len(m)
+        f = self.run_claim("Between 40% and 50% of primary tumors have all five data layers.")
+        self.assertEqual((f["verdict"], f["evidence"]["n_samples"], f["evidence"]["denominator"]),
+                         ("supported" if 0.40 <= share <= 0.50 else "contradicted", n, len(m)))
+        f = self.run_claim("Between 50% and 60% of primary tumors have all five data layers.")
+        self.assertEqual((f["verdict"], cv_text(f)), ("contradicted", f"{share * 100:.1f}% ({n} of {len(m)})"))
+        f = self.run_claim("From 500 to 600 primary tumors have all five data layers.")
+        self.assertEqual((f["verdict"], f["evidence"]["n_samples"]), ("supported" if 500 <= n <= 600 else "contradicted", n))
+        f = self.run_claim("From 600 to 700 primary tumors have all five data layers.")
+        self.assertEqual((f["verdict"], f["correct_value"]["value"]), ("contradicted", n))
 
 
 if __name__ == "__main__":
