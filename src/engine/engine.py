@@ -187,6 +187,12 @@ class Context:
                                if self.manifest and "sample_type" in self.manifest[0] else {})
         self.slide_rows = L.load_slide_manifest(data_dir) or []
         self.slide_kind_col = L.slide_kind_column(self.slide_rows)
+        self._genes = None  # gene-level mutation calls, read on the first gene claim (about a second)
+
+    def gene_data(self):
+        if self._genes is None:
+            self._genes = L.load_gene_mutations(self.data_dir) or False
+        return self._genes or None
 
     def population(self, code="01"):
         return self.by_code.get(code, [])
@@ -530,6 +536,50 @@ def parse_slide_count(text):
     return {"slide_kind": kind, "quantifier": count_quantifier(low, m.start(1), n, noun)}
 
 
+# ---- gene-level mutation claims ----
+# Upper-case words that are not genes in this dataset (and HER2-positive style status words are skipped by the pattern).
+GENE_STOP = {"TCGA", "BRCA", "RNA", "DNA", "MRNA", "ER", "PR", "HER2", "PAM50", "OS", "PFI", "DSS", "DFI", "IHC", "FFPE",
+             "TNBC", "RPPA", "CNV", "GISTIC", "AJCC", "TSV", "CSV", "IDC", "UCSC", "NCI", "DX", "TS", "BS", "MS",
+             "II", "III", "IV", "VI", "LUMA", "LUMB", "COSMIC", "WHO", "USA", "UK", "AI", "LLM", "FDA", "HIPAA", "OK"}
+GENE_TOKEN = r"\b[A-Z][A-Z0-9]{1,9}\b(?!-(?:positive|negative|enriched|low|high|like|status)\b)"
+GENE_RUN = re.compile(GENE_TOKEN + r"(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+)" + GENE_TOKEN + r")*")
+GENE_AFTER = re.compile(r"\s*(?:genes?\s+)?(?:mutations?|mutated|mutants?|variants?|alterations?|altered)\b|[- ](?:mutant|mutated)\b|"
+                        r"\s+(?:is|are|was|were|gets?|appears?)\s+(?:\w+\s+){0,4}?(?:mutated|altered)\b", re.I)
+GENE_BEFORE = re.compile(r"\b(?:mutations?|variants?|alterations?)\s+(?:in|of|at|affecting)\s+(?:the\s+)?(?:genes?\s+)?$", re.I)
+GENE_EXT = re.compile(r"\b(?:(second|third|2nd|3rd)\s+)?(?:(two|three|four|five|2|3|4|5)\s+)?(most|least)\s+"
+                      r"(?:frequently\s+|commonly\s+|often\s+)?(?:mutated|altered)\b|\b(most|least)\s+(?:frequent|common)\s+(?:mutations?|mutated)\b|"
+                      r"\b(?:mutated|altered)\s+(most|least)\s+(?:often|frequently|commonly)\b")
+GENEISH = re.compile(r"\bmutated\b|\bmutants?\b|\bmutations?\s+(?:occur|are found|is found|are seen|in|of|at)\b|"
+                     r"\bcarr(?:y|ies)\b[^.]*\bmutations?\b|\bmutation (?:rate|frequency)\b", re.I)
+MUTATION_DATA_WORDS = re.compile(r"\b(?:data|calls?|profil\w*|records?|available|availability|coverage|layers?|files?|measured|join\w*|overlap\w*)\b", re.I)
+ORDINAL = {"second": 2, "2nd": 2, "third": 3, "3rd": 3}
+CARDINAL = {"two": 2, "three": 3, "four": 4, "five": 5, "2": 2, "3": 3, "4": 4, "5": 5}
+
+
+def gene_mentions(text):
+    """Gene symbols used as genes in a mutation claim, in order: 'TP53 is mutated', 'PIK3CA mutations',
+    'mutations in GATA3', 'TP53 and PIK3CA are mutated'. A capitalised word that is not used this way
+    (for example 'databases such as COSMIC') is not a gene."""
+    out = []
+    for m in GENE_RUN.finditer(text):
+        if GENE_AFTER.match(text, m.end()) or GENE_BEFORE.search(text[max(0, m.start() - 40):m.start()]):
+            for tok in re.findall(GENE_TOKEN, m.group(0)):
+                if tok not in GENE_STOP and tok not in out:
+                    out.append(tok)
+    return out
+
+
+def parse_gene_claim(text, genes):
+    low = text.lower()
+    m = GENE_EXT.search(low)
+    ext = None
+    if m:
+        word = m.group(3) or m.group(4) or m.group(5)
+        ext = {"direction": word, "rank": ORDINAL.get(m.group(1) or "", 1), "top": CARDINAL.get(m.group(2) or "", 1)}
+    return {"type": "gene", "genes": genes, "extremum": ext, "quantifier": None if ext else parse_quantifier(text),
+            "filters": parse_filters(text), "pop_code": "01", "pop_label": "primary tumor samples"}
+
+
 PCT = r"\s*(?:%|percent|per cent)"
 RANGE_PCT = [re.compile(r"\b(?:between|from)\s+" + NUM + r"(?:" + PCT + r")?\s*(?:and|to|-|\u2013)\s*" + NUM + PCT),
              re.compile(r"(?<![\w.,])" + NUM + r"(?:" + PCT + r")?\s*(?:-|\u2013|to)\s*" + NUM + PCT)]
@@ -559,12 +609,51 @@ def parse_range(low):
     return None
 
 
+FRACTION_WORDS = [(r"two[- ]thirds", 2 / 3, "two thirds"), (r"three[- ]quarters", 0.75, "three quarters"),
+                  (r"(?:a|one)[- ]third", 1 / 3, "a third"), (r"(?:a|one)[- ]quarter", 0.25, "a quarter"),
+                  (r"(?:a|one)[- ]fifth", 0.2, "a fifth"), (r"(?:a|one)[- ]tenth", 0.1, "a tenth"), (r"half", 0.5, "half")]
+SMALL_NUMBERS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+
+
+def word_fraction(low):
+    """'about a third', 'more than a quarter', 'one in five', 'half' -> a fraction quantifier, or None."""
+    lead = r"\b(?:(" + "|".join(COUNT_WORDS) + "|" + HEDGE_WORDS + r")\s+)?"
+    hit = None
+    m = re.search(lead + r"(?:one|1) in (\d+|" + "|".join(SMALL_NUMBERS) + r")\b", low)
+    if m:
+        d = int(m.group(2)) if m.group(2).isdigit() else SMALL_NUMBERS[m.group(2)]
+        if d > 0:
+            hit = (m.group(1), 1.0 / d, f"one in {m.group(2)}")
+    if hit is None:
+        for pat, val, name in FRACTION_WORDS:
+            m = re.search(lead + pat + r"\b", low)
+            if m:
+                hit = (m.group(1), val, name)
+                break
+    if hit is None:
+        return None
+    word, val, name = hit
+    comp = COUNT_WORDS.get(word or "", "~")
+    if comp == "==":
+        comp = "~"
+    said = f"'{word + ' ' if word else ''}{name}'"
+    if comp == "~":
+        reading = f"{said} means within {int(CFG['about_tolerance'] * 100)} points of {val * 100:.1f} percent"
+    else:
+        reading = f"{said} means {comp} {val * 100:.1f} percent"
+    return {"kind": "fraction", "comparator": comp, "threshold": val, "reading": reading}
+
+
 def parse_quantifier(text):
     """Return dict(kind, comparator, threshold, reading) or None. May return kind 'invalid'."""
     low = text.lower().replace("\u2019", "'")
     rq = parse_range(low)
     if rq:
         return rq
+    if re.search(r"\b(?:one|1)\s+in\s+(?:\d+|two|three|four|five|six|seven|eight|nine|ten)\b", low):
+        wq = word_fraction(low)  # "1 in 10 tumors" is a share, not the count 1
+        if wq:
+            return wq
     if re.search(r"(?:^|[\s(])[-\u2212]\s*\d[\d,]*(?:\.\d+)?\s*(?:%|percent|samples?|patients?|tumou?rs?|cases?|deaths?|events?)", low):
         return {"kind": "invalid", "reading": "a negative number cannot describe a count or a share"}
     m = re.search(r"\b(fewer than|less than|under|below|more than|over|above|at least|at most|up to|exactly)\s+" + NUM +
@@ -599,6 +688,13 @@ def parse_quantifier(text):
         (r"\b(nearly|almost) all\b", ">=", CFG["nearly_all"], f"'nearly all' means at least {int(CFG['nearly_all'] * 100)} percent"),
         (r"\b(less|fewer) than half\b", "<", 0.5, "'less than half' means under 50 percent"),
         (r"\b(more than|over) half\b", ">", 0.5, "'more than half' means over 50 percent"),
+    ]:
+        if re.search(pat, low):
+            return {"kind": "fraction", "comparator": comp, "threshold": thr, "reading": reading}
+    wq = word_fraction(low)
+    if wq:
+        return wq
+    for pat, comp, thr, reading in [
         (r"\b(every|each|all|entire)\b", "==", 1.0, "'all/every' means 100 percent"),
         (r"\b(most|majority)\b", ">", CFG["most_threshold"], f"'most' means more than {int(CFG['most_threshold'] * 100)} percent"),
     ]:
@@ -612,6 +708,9 @@ def parse_claim(text):
     q = parse_quantifier(text)
     if q and q["kind"] == "invalid":
         return {"type": "invalid", "reading": q["reading"]}
+    genes = gene_mentions(text)
+    if genes:
+        return parse_gene_claim(text, genes)
     sc = parse_slide_count(text)
     if sc:
         return {"type": "slidecount", "slide_kind": sc["slide_kind"], "quantifier": sc["quantifier"]}
@@ -953,6 +1052,16 @@ def evaluate_claim(ctx, fid, text):
         return popsize_finding(ctx, f, parsed, total)
     if parsed["type"] == "slidecount":
         return slidecount_finding(ctx, f, parsed)
+    if parsed["type"] == "gene":
+        return gene_finding(ctx, f, parsed)
+    if "mutation" in parsed.get("targets", []) and GENEISH.search(text) and not MUTATION_DATA_WORDS.search(text):
+        # Reads like a claim about a gene ("is mutated in a third of tumors") but no gene was recognised:
+        # never answer it with how many tumors have mutation data.
+        f["evidence"]["calculation"] = "not run: this reads as a gene-level mutation claim, but no gene symbol from the mutation file was recognised"
+        f["limitation"] = "No verdict: the claim is about how often a gene is mutated, and the gene it means could not be read."
+        f["needs_human_review"], f["review_reason"] = True, "A gene-level mutation claim whose gene could not be read; it was not checked."
+        f["next_actions"] = ["Name the gene by its official symbol in capitals (for example TP53), then re-run."]
+        return f
     if parsed["type"] == "extremum":
         return extremum_finding(ctx, f, parsed, total)
 
@@ -1156,6 +1265,138 @@ def slidecount_finding(ctx, f, parsed):
     return f
 
 
+GENE_FILE = L.LAYERS["mutation"]["file"]
+GENE_LIMITATION = ("A gene counts as mutated when mutation_gene_level.tsv.gz holds 1 for it in that sample (the file's gene-level call); "
+                   "the kind of mutation and whether it changes the protein were not checked. Only primary tumors that have mutation data "
+                   "are in the denominator, so tumors that were never profiled are not counted as unmutated.")
+
+
+def gene_cannot_answer(f, why, action):
+    f["evidence"]["calculation"] = f"not run: {why}"
+    f["limitation"] = f"The data cannot answer this: {why}."
+    f["guardrail_flags"] = ["data_cannot_answer"]
+    f["next_actions"] = [action]
+    return f
+
+
+def gene_finding(ctx, f, parsed):
+    """Share, count or ranking of tumors with a mutation in a named gene, from mutation_gene_level.tsv.gz."""
+    data = ctx.gene_data()
+    if not data:
+        return gene_cannot_answer(f, f"{GENE_FILE} is not in the data folder", "Add the gene-level mutation file, then re-run.")
+    if data["unexpected"]:
+        return gene_cannot_answer(f, f"{GENE_FILE} holds values other than 0 and 1 ({', '.join(data['unexpected'])}), so its mutation calls cannot be read",
+                                  "Check how the mutation file encodes a mutation before using it.")
+    genes = [data["names"].get(g.upper(), g) for g in parsed["genes"]]
+    unknown = [g for g in parsed["genes"] if g.upper() not in data["names"]]
+    if unknown:
+        return gene_cannot_answer(f, f"{', '.join(unknown)} {'is' if len(unknown) == 1 else 'are'} not among the {len(data['names']):,} genes in {GENE_FILE}",
+                                  "Check the gene symbol (official HGNC name, for example ERBB2 rather than HER2) and re-run.")
+    pop = ctx.population(parsed["pop_code"])
+    profiled = set(data["samples"])
+    attr_keys = list(OrderedDict.fromkeys(x["attr"] for x in parsed["filters"]))
+    if [a for a in attr_keys if a not in ctx.attrs]:
+        return gene_cannot_answer(f, "a clinical field the claim names is not in the clinical file", "Check the column names in the clinical file.")
+    ops = [("has mutation data", lambda s: s in profiled)] + [(x["label"], lambda s, x=x: x["test"](ctx.attr(x["attr"], s))) for x in parsed["filters"]]
+    steps, den_ids = run_ops(pop, ops, parsed["pop_label"])
+    den_set, den = set(den_ids), len(den_ids)
+    group = parsed["pop_label"] + " with mutation data" + ("".join(f", {x['label']}" for x in parsed["filters"]))
+    sources = [GENE_FILE, "sample_manifest.csv"] + (["clinical.tsv"] if attr_keys else [])
+    filt_txt = (". " + attr_used_text(ctx, attr_keys)) if attr_keys else ""
+    f["limitation"] = GENE_LIMITATION + (" " + limitation_for({"filters": parsed["filters"]}, []) if attr_keys else "")
+    counts = {g: len(m & den_set) for g, m in data["mutated"].items()}
+    n_named = {g: counts.get(g, 0) for g in genes}
+    ext = parsed["extremum"]
+
+    if ext:
+        g = genes[0]
+        if ext["direction"] == "least":
+            f["evidence"].update({"metric_name": "extremum_gene_mutated", "value": n_named[g], "n_samples": n_named[g], "denominator": den,
+                                  "source_files": sources,
+                                  "calculation": (f"{g} is mutated in {n_named[g]} of {den} {group}. {len(data['names']) - len([1 for c in counts.values() if c]):,} "
+                                                  f"of {len(data['names']):,} genes in {GENE_FILE} have no mutation in this group, so 'least mutated' has no single answer{filt_txt}.")})
+            f["cohort_trace"] = steps + [{"step": f"{g} mutated", "n_before": den, "n_after": n_named[g]}]
+            f["needs_human_review"], f["review_reason"] = True, "A 'least mutated gene' claim has no single answer: thousands of genes have no mutation."
+            f["next_actions"] = ["Name the comparison set of genes, or state a share for this gene."]
+            return f
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        rank_of = lambda name: 1 + sum(1 for c in counts.values() if c > n_named[name])  # ties share a rank
+        k = max(ext["top"], len(genes))
+        if len(genes) > 1 or ext["top"] > 1:
+            ok = len(genes) == k and all(rank_of(x) <= k for x in genes)
+            said = f"{', '.join(genes)} {'are' if len(genes) > 1 else 'is'} the {k} most frequently mutated genes"
+        else:
+            ok = rank_of(g) == ext["rank"]
+            said = f"{g} is the {'' if ext['rank'] == 1 else {2: 'second ', 3: 'third '}[ext['rank']]}most frequently mutated gene"
+        top = "; ".join(f"{name} {c} ({c / den * 100:.1f}%)" for name, c in ranked[:max(5, k + 2)]) if den else "none"
+        f["evidence"].update({"metric_name": "extremum_gene_mutated", "value": n_named[g], "n_samples": n_named[g], "denominator": den,
+                              "source_files": sources,
+                              "calculation": (f"Mutated tumors per gene among {den} {group}, compared across all {len(data['names']):,} genes in {GENE_FILE} "
+                                              f"(1 = mutated): {top}. " + "; ".join(f"{x}: {n_named[x]} of {den}, rank {rank_of(x)}" for x in genes)
+                                              + f". Claim: {said}{filt_txt}.")})
+        f["cohort_trace"] = steps + [{"step": f"{g} mutated", "n_before": den, "n_after": n_named[g]}]
+        f["verdict"] = "supported" if ok else "contradicted"
+        if ok:
+            f["next_actions"] = ["Check the mutation types behind the ranking before relying on it."]
+            close = [name for name, c in ranked[:k + 1] if name not in genes and abs(c - n_named[g]) <= max(1, 0.03 * den)]
+            if close:
+                f["needs_human_review"], f["review_reason"] = True, f"The ranking is close: {close[0]} has {counts[close[0]]} of {den}."
+        else:
+            lead = ", ".join(f"{name} ({c} of {den})" for name, c in ranked[:k])
+            f["correct_value"] = {"value": ranked[0][1] if ranked else 0, "unit": "samples",
+                                  "text": f"The most frequently mutated {'gene is' if k == 1 else f'{k} genes are'} {lead}; "
+                                          + "; ".join(f"{x} has {n_named[x]} of {den} (rank {rank_of(x)})" for x in genes)}
+            f["next_actions"] = [f"Restate the ranking with the measured counts ({lead})."]
+        return f
+
+    if len(genes) > 1:
+        shown = "; ".join(f"{x} {n_named[x]} of {den}" for x in genes)
+        f["evidence"].update({"metric_name": "not_computed", "value": None, "n_samples": 0, "denominator": den, "source_files": sources,
+                              "calculation": f"Mutated tumors among {den} {group}: {shown}. The claim names several genes, so it was not judged as one statement."})
+        f["needs_human_review"], f["review_reason"] = True, "The claim names several genes; check each gene in its own sentence."
+        f["next_actions"] = ["Write one sentence per gene, each with its own number."]
+        return f
+
+    g = genes[0]
+    num, q = n_named[g], parsed["quantifier"]
+    is_count = bool(q and q["kind"] == "count")
+    value = num / den if den else None
+    metric = ("count_" if is_count else "share_") + re.sub(r"\W+", "_", g.lower()) + "_mutated"
+    calc = (f"{g} mutated (1 in {GENE_FILE}) in {num} of {den} {group}" + (f" = {value * 100:.1f}%" if value is not None else "")
+            + f". Denominator: primary tumors with mutation data ({steps[1]['n_after']} of {len(pop)} primary tumors){filt_txt}")
+    f["evidence"].update({"metric_name": metric, "value": num if is_count else (round(value, 4) if value is not None else None),
+                          "n_samples": num, "denominator": den, "source_files": sources})
+    f["cohort_trace"] = steps + [{"step": f"{g} mutated", "n_before": den, "n_after": num}]
+    if den < CFG["min_population"]:
+        f["evidence"]["calculation"] = calc + f". Only {den} samples are in the denominator, which is too few to judge."
+        f["needs_human_review"], f["review_reason"] = True, "The denominator is too small to judge the claim."
+        f["next_actions"] = ["Widen the group so more profiled tumors remain."]
+        return f
+    if q is None or q["kind"] == "invalid":
+        f["evidence"]["calculation"] = calc + ". The claim has no measurable threshold, so no verdict is given."
+        f["needs_human_review"], f["review_reason"] = True, "The claim has no measurable threshold; a person must decide what counts as common."
+        f["next_actions"] = [f"State a share the claim should meet (the data shows {value * 100:.1f}%), then re-run."]
+        return f
+    ok = satisfied(q, value, num)
+    f["verdict"] = "supported" if ok else "contradicted"
+    f["evidence"]["calculation"] = calc + f". Claim read as: {q['reading']}."
+    reasons = []
+    lead = value if q["kind"] == "fraction" else num
+    if q["comparator"] not in ("~", "~c") and not (is_count and q["comparator"] == "=="):
+        edges = [q["threshold"]] if q["comparator"] != "range" else range_edges(q)
+        if edges and min(abs(lead - b) for b in edges) <= (CFG["borderline_margin"] if q["kind"] == "fraction" else 0):
+            reasons.append(f"The result sits {missing_text(q, lead)}.")
+    if reasons:
+        f["needs_human_review"], f["review_reason"] = True, " ".join(reasons)
+    if ok:
+        f["next_actions"] = ["Check the mutation types behind the call before relying on it."]
+    else:
+        f["correct_value"] = ({"value": round(value * 100, 1), "unit": "percent", "text": f"{value * 100:.1f}% ({num} of {den} {group})"}
+                              if q["kind"] == "fraction" else {"value": num, "unit": "samples", "text": f"{num} tumors ({num} of {den} {group})"})
+        f["next_actions"] = [f"Restate the claim with the measured figure ({num} of {den} {group})."]
+    return f
+
+
 def popsize_finding(ctx, f, parsed, total):
     key = parsed["pop"]
     if key.startswith("type:"):
@@ -1254,7 +1495,22 @@ def split_subclaims(text):
                  r"(?P<what>[^,]*?),\s*(?:accounting for|making up|representing|comprising|constituting|which (?:accounts for|makes up|represents))\s+(?P<tail>.+)$", t, re.I)
     if m:
         return [f"{m.group('subj')} is the {m.group('ext')}{m.group('what')}.", f"{m.group('subj')} accounts for {m.group('tail').strip()}"]
-    return split_counts(t) or [t]
+    return split_gene_list(t) or split_counts(t) or [t]
+
+
+def split_gene_list(t):
+    """'TP53 and PIK3CA are mutated in about a third of tumors' -> one sentence per gene. Rankings stay whole."""
+    genes = gene_mentions(t)
+    if len(genes) < 2 or GENE_EXT.search(t.lower()):
+        return None
+    for m in GENE_RUN.finditer(t):
+        toks = [x for x in re.findall(GENE_TOKEN, m.group(0)) if x not in GENE_STOP]
+        if len(toks) >= 2 and set(toks) <= set(genes):
+            rest = re.sub(r"^\s+are\b", " is", t[m.end():])
+            rest = re.sub(r"^\s+have\b", " has", rest)
+            rest = re.sub(r"^\s+were\b", " was", rest)
+            return [t[:m.start()] + g + rest for g in toks]
+    return None
 
 
 RANGE_WORDS = re.compile(r"\bbetween\s+[\d,.]+\s*(?:%|percent)?\s*and\s+\d|\bfrom\s+[\d,.]+\s*(?:%|percent)?\s*to\s+\d|\d\s*(?:-|–|to)\s*\d")

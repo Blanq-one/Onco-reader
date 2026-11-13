@@ -73,7 +73,7 @@ def write_release(folder, mutation_rows=None, er=None):
         for i, kind in enumerate(SLIDE_KINDS):
             s = PRIMARY[i % len(PRIMARY)]
             w.writerow([f"{s}A-01-X{i}", s, s[:12], kind, 40])
-    er = er or {s: ("Positive" if i < 30 else "Negative") for i, s in enumerate(PRIMARY)}
+    er = er or {s: ("Negative" if i % 4 == 0 else "Positive") for i, s in enumerate(PRIMARY)}  # 10 negative, 30 positive
     with open(os.path.join(raw, "clinical.tsv"), "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh, delimiter="\t")
         w.writerow(["sampleID", "breast_carcinoma_estrogen_receptor_status", "radiation_therapy",
@@ -317,6 +317,134 @@ class TestRangesReal(RealCase):
         self.assertEqual((f["verdict"], f["evidence"]["n_samples"]), ("supported" if 500 <= n <= 600 else "contradicted", n))
         f = self.run_claim("From 600 to 700 primary tumors have all five data layers.")
         self.assertEqual((f["verdict"], f["correct_value"]["value"]), ("contradicted", n))
+
+
+# ---------- item 4: gene-level mutation claims ----------
+class TestGeneClaimsSynthetic(SyntheticCase):
+    # 30 of 40 primary tumors are in the mutation file: PIK3CA 12, TP53 10, GATA3 4, CDH1 2, TTN 0
+
+    def test_share_uses_profiled_primary_tumors_as_denominator(self):
+        f = check(self.ctx, "TP53 is mutated in about a third of tumors.", self)
+        ev = f["evidence"]
+        self.assertEqual((f["verdict"], ev["n_samples"], ev["denominator"], ev["metric_name"]), ("supported", 10, 30, "share_tp53_mutated"))
+        self.assertIn("Denominator: primary tumors with mutation data (30 of 40 primary tumors)", ev["calculation"])
+        self.assertEqual(ev["source_files"][0], "mutation_gene_level.tsv.gz")
+        self.assertEqual(f["cohort_trace"][-1], {"step": "TP53 mutated", "n_before": 30, "n_after": 10})
+
+    def test_threshold_claims(self):
+        self.assertEqual(self.verdict("GATA3 mutations occur in more than 10% of tumors."), "supported")  # 13.3%
+        f = check(self.ctx, "GATA3 mutations occur in more than 20% of tumors.", self)
+        self.assertEqual(f["verdict"], "contradicted")
+        self.assertTrue(cv_text(f).startswith("13.3% (4 of 30 "))
+        self.assertEqual(self.verdict("TTN mutations occur in fewer than 1 in 10 tumors."), "supported")  # in the file, never mutated
+        self.assertEqual(self.verdict("At least 12 tumors carry PIK3CA mutations."), "supported")
+        self.assertEqual(self.verdict("TP53 is mutated in between 30% and 40% of tumors."), "supported")
+
+    def test_most_frequently_mutated_gene(self):
+        self.assertEqual(self.verdict("PIK3CA is the most frequently mutated gene."), "supported")
+        f = check(self.ctx, "TP53 is the most frequently mutated gene.", self)
+        self.assertEqual(f["verdict"], "contradicted")
+        self.assertIn("PIK3CA (12 of 30)", cv_text(f))
+        self.assertIn("TP53 has 10 of 30 (rank 2)", cv_text(f))
+        self.assertEqual(self.verdict("TP53 is the second most frequently mutated gene."), "supported")
+        self.assertEqual(self.verdict("PIK3CA and TP53 are the two most frequently mutated genes."), "supported")
+        self.assertEqual(self.verdict("PIK3CA and GATA3 are the two most frequently mutated genes."), "contradicted")
+        self.assertIn("compared across all 5 genes", check(self.ctx, "PIK3CA is the most frequently mutated gene.", self)["evidence"]["calculation"])
+
+    def test_gene_not_in_the_file_cannot_be_answered(self):
+        for text in ("FAKEGENE1 is mutated in about 5% of tumors.", "XYZW mutations occur in 5% of tumors.",
+                     "BRCA2 is the most frequently mutated gene."):
+            f = check(self.ctx, text, self)
+            self.assertEqual((f["verdict"], f["guardrail_flags"]), ("insufficient_evidence", ["data_cannot_answer"]), text)
+            self.assertIn("not among the 5 genes", f["evidence"]["calculation"])
+
+    def test_never_supported_from_mutation_coverage(self):
+        for text in ("tp53 is mutated in about a third of tumors.", "The gene is mutated in most tumors.",
+                     "Most tumors carry a driver mutation."):
+            f = check(self.ctx, text, self)
+            self.assertEqual(f["verdict"], "insufficient_evidence", text)
+            self.assertFalse(f["evidence"]["metric_name"].startswith(("coverage_", "overlap_")), text)
+        # a real coverage claim still works
+        self.assertEqual(self.verdict("Mutation data is available for most primary tumors."), "supported")
+
+    def test_not_a_gene(self):
+        f = check(self.ctx, "Mutation calls can be matched to external databases such as COSMIC.", self)
+        self.assertNotIn("gene", f["evidence"]["metric_name"])
+        self.assertEqual(E.gene_mentions("Mutation data covers most HER2-positive tumors."), [])
+        self.assertEqual(E.gene_mentions("TP53 and PIK3CA are mutated in about a third of tumors."), ["TP53", "PIK3CA"])
+
+    def test_gene_list_gives_one_check_per_gene(self):
+        f = check(self.ctx, "TP53 and GATA3 are mutated in about a third of tumors.", self)
+        self.assertEqual(parts(f), [("TP53 is mutated in about a third of tumors.", "supported", 10),
+                                    ("GATA3 is mutated in about a third of tumors.", "contradicted", 4)])
+        self.assertEqual(f["verdict"], "contradicted")
+
+    def test_subgroup_and_thin_denominator(self):
+        f = check(self.ctx, "TP53 mutations occur in about a third of ER-negative tumors.", self)
+        self.assertEqual((f["verdict"], f["evidence"]["denominator"]), ("insufficient_evidence", 8))  # 8 profiled ER-negative
+        self.assertIn("too small", f["review_reason"])
+        self.assertIn("clinical.tsv", f["evidence"]["source_files"])
+
+    def test_missing_or_unreadable_mutation_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_release(tmp)  # no mutation file
+            f = check(E.Context(tmp), "TP53 is mutated in about a third of tumors.", self)
+            self.assertEqual((f["verdict"], f["guardrail_flags"]), ("insufficient_evidence", ["data_cannot_answer"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            write_release(tmp, mutation_rows={"TP53": PRIMARY[:10]})
+            path = os.path.join(tmp, "raw", "mutation_gene_level.tsv.gz")
+            with gzip.open(path, "wt", encoding="utf-8") as fh:
+                fh.write("sample\t" + "\t".join(PRIMARY[:3]) + "\nTP53\t0.5\t1\tMissense\n")
+            f = check(E.Context(tmp), "TP53 is mutated in about a third of tumors.", self)
+            self.assertEqual(f["guardrail_flags"], ["data_cannot_answer"])
+            self.assertIn("values other than 0 and 1", f["evidence"]["calculation"])
+
+
+class TestGeneClaimsReal(RealCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        mut = pd.read_csv(os.path.join(DATA_DIR, "raw", "mutation_gene_level.tsv.gz"), sep="\t", index_col=0)
+        primary = set(cls.manifest.sample_id[cls.manifest.sample_id.str[13:15] == "01"])
+        cls.cols = [c for c in mut.columns if c[:15] in primary]
+        cls.calls = mut[cls.cols]
+        cls.per_gene = (cls.calls == 1).sum(axis=1).sort_values(ascending=False)
+
+    def test_encoding_is_zero_or_one(self):
+        self.assertTrue(set(pd.unique(self.calls.values.ravel())) <= {0, 1})
+
+    def test_share_and_denominator_match_pandas(self):
+        den = len(self.cols)
+        for gene, text, test in (("TP53", "TP53 is mutated in about a third of tumors.", lambda v: abs(v - 1 / 3) <= 0.03),
+                                 ("GATA3", "GATA3 mutations occur in more than 10% of tumors.", lambda v: v > 0.10)):
+            n = int(self.per_gene[gene])
+            f = self.run_claim(text)
+            self.assertEqual((f["evidence"]["n_samples"], f["evidence"]["denominator"]), (n, den), gene)
+            self.assertAlmostEqual(f["evidence"]["value"], round(n / den, 4))
+            self.assertEqual(f["verdict"], "supported" if test(n / den) else "contradicted", gene)
+
+    def test_most_frequently_mutated_matches_pandas(self):
+        top, second = self.per_gene.index[0], self.per_gene.index[1]
+        self.assertEqual(self.run_claim(f"{top} is the most frequently mutated gene.")["verdict"], "supported")
+        f = self.run_claim(f"{second} is the most frequently mutated gene.")
+        self.assertEqual(f["verdict"], "contradicted")
+        self.assertIn(f"{top} ({int(self.per_gene[top])} of {len(self.cols)})", cv_text(f))
+        self.assertEqual(self.run_claim("PIK3CA is the most frequently mutated gene.")["verdict"],
+                         "supported" if top == "PIK3CA" else "contradicted")
+
+    def test_subgroup_matches_pandas(self):
+        col = next(n["column_used"] for n in self.ctx.attr_notes if n["attribute"] == "ER status")
+        clin = pd.read_csv(os.path.join(DATA_DIR, "raw", "clinical.tsv"), sep="\t", low_memory=False).set_index("sampleID")
+        neg = [c for c in self.cols if str(clin[col].get(c, "")).strip().lower().startswith("neg")]
+        n = int((self.calls.loc["TP53", neg] == 1).sum())
+        f = self.run_claim("TP53 mutations occur in about half of ER-negative tumors.")
+        self.assertEqual((f["evidence"]["n_samples"], f["evidence"]["denominator"]), (n, len(neg)))
+        self.assertEqual(f["verdict"], "supported" if abs(n / len(neg) - 0.5) <= 0.03 else "contradicted")
+
+    def test_unknown_gene(self):
+        self.assertNotIn("FAKEGENE1", self.calls.index)
+        f = self.run_claim("FAKEGENE1 is mutated in about 5% of tumors.")
+        self.assertEqual((f["verdict"], f["guardrail_flags"]), ("insufficient_evidence", ["data_cannot_answer"]))
 
 
 if __name__ == "__main__":

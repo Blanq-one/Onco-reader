@@ -144,6 +144,37 @@ def load_manifest(data_dir):
         return list(csv.DictReader(fh))
 
 
+def load_gene_mutations(data_dir):
+    """Gene-level mutation calls from mutation_gene_level.tsv.gz, or None if the file is not there.
+
+    The file has one row per gene and one column per sample: 1 means the gene carries a mutation
+    in that sample (the file's gene-level call), 0 means it does not. Returns
+      {"samples": [sample ids], "names": {GENE: name as written}, "mutated": {name: frozenset(sample ids)},
+       "unexpected": up to 5 values that are neither 0 nor 1}
+    Genes with no mutation at all are in "names" but not in "mutated".
+    """
+    path = os.path.join(data_dir, "raw", LAYERS["mutation"]["file"])
+    if not os.path.exists(path):
+        return None
+    names, mutated, unexpected = {}, {}, []
+    with _open(path) as fh:
+        header = fh.readline().rstrip("\r\n").split("\t")
+        samples = [h.strip()[:15] for h in header[1:]]
+        for line in fh:
+            parts = line.rstrip("\r\n").split("\t")
+            if len(parts) < 2 or not parts[0].strip():
+                continue
+            gene, vals = parts[0].strip(), parts[1:]
+            names.setdefault(gene.upper(), gene)
+            ones = vals.count("1")
+            if ones + vals.count("0") != len(vals) and len(unexpected) < 5:
+                unexpected.extend(sorted({v for v in vals if v not in ("0", "1")})[:5 - len(unexpected)])
+            if ones:
+                hit = frozenset(samples[i] for i, v in enumerate(vals) if v == "1" and i < len(samples))
+                mutated[gene] = mutated.get(gene, frozenset()) | hit
+    return {"samples": samples, "names": names, "mutated": mutated, "unexpected": unexpected}
+
+
 # Barcode sample type code -> the sample_type value used in sample_manifest.csv
 SAMPLE_TYPE_NAMES = OrderedDict([("01", "Primary Tumor"), ("11", "Solid Tissue Normal"), ("06", "Metastatic")])
 
