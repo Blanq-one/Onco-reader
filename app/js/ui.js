@@ -1,4 +1,4 @@
-import { h, sv, pct, fmtNum, plural, toast } from './util.js';
+import { h, sv, pct, fmtNum, fmtValue, plural, toast } from './util.js';
 import { VERDICT, FLAG_TEXT, isBlocked, cannotAnswer, hasNumber, decisions, decide, decisionAllowed, BLOCKED_OVERRIDE_ERROR, reviewStatus, reviewJson, state, dataUrl, minGroup, minEvents, effectiveVerdict } from './state.js';
 import { nextStepExport } from './decision.js';
 
@@ -39,6 +39,8 @@ export function plainResult(f) {
     s = 'Not checked: the data has no field that can answer it.';
   } else if (metric.startsWith('survival_groups')) {
     s = 'Not judged: this tool shows how many deaths each group has, not whether one group lives longer.';
+  } else if (f.verdict === 'supported' && isRatio(f) && hasNumber(f)) {
+    s = 'The data agrees: ' + ratioText(f) + ' (' + groupsText(f) + ').';
   } else if (f.verdict === 'supported') {
     const share = /^(share_|coverage_|overlap_)/.test(metric) && e.denominator ? ' (' + pct(e.n_samples, e.denominator) + ')' : '';
     s = 'The data agrees' + (hasNumber(f) ? ': ' + fmtNum(e.n_samples) + ' of ' + fmtNum(e.denominator) + share : '') + '.';
@@ -52,10 +54,24 @@ export function plainResult(f) {
   if (reviewStatus(f) === 'overridden') s += ' A reviewer changed the verdict to ' + (VERDICT[effectiveVerdict(f)] || {}).label + '.';
   return s;
 }
+// Ratio claims (engine v1.3, metric ratio_...): the value is the ratio itself, so it is shown as "2.10 to 1",
+// never as "141 of 208" or as a percentage.
+export const isRatio = (f) => String((f.evidence || {}).metric_name || '').startsWith('ratio_');
+export const ratioText = (f) => Number(f.evidence.value).toFixed(2) + ' to 1';
+export const groupsText = (f) => ((f.evidence || {}).groups || []).map((g) => g.group + ' ' + fmtNum(g.n)).join(' vs ');
 export function headlineText(f) {
   if (!hasNumber(f)) return null;
   const e = f.evidence;
-  return fmtNum(e.n_samples) + ' of ' + fmtNum(e.denominator);
+  return isRatio(f) ? ratioText(f) : fmtNum(e.n_samples) + ' of ' + fmtNum(e.denominator);
+}
+// The share that goes with the headline ("48.6%"), or the group counts for a ratio.
+export function shareText(f) {
+  if (!hasNumber(f)) return null;
+  return isRatio(f) ? groupsText(f) : pct(f.evidence.n_samples, f.evidence.denominator);
+}
+export function valueText(f, v) {
+  const x = v === undefined ? f.evidence.value : v;
+  return isRatio(f) && x != null ? Number(x).toFixed(2) + ' to 1' : fmtValue(x);
 }
 // On a phone a table with class "stack" shows one block per row, each cell labeled with its column header (app.css).
 export function stackTable(table) {
@@ -214,6 +230,7 @@ export { pct };
 // One plain-English sentence saying what the headline numerator and denominator are.
 export function caption(f) {
   const e = f.evidence, t = f.cohort_trace || [];
+  if (isRatio(f)) return 'The ratio compares two group sizes: ' + groupsText(f) + ', so ' + fmtNum(e.n_samples) + ' of the ' + fmtNum(e.denominator) + ' samples in the two groups are in the first.';
   const n = fmtNum(e.n_samples), d = fmtNum(e.denominator);
   let ns = null;
   for (let i = t.length - 1; i >= 0; i--) if (t[i].n_after === e.n_samples) { ns = t[i]; break; }

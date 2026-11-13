@@ -1,6 +1,6 @@
 import { h, countUp, copyText, toast, fmtNum, fmtValue, pct, plural } from '../util.js';
 import { state, findings, isBlocked, cannotAnswer, hasNumber, VERDICT, FLAG_TEXT } from '../state.js';
-import { verdictBadge, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles } from '../ui.js';
+import { verdictBadge, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText } from '../ui.js';
 
 const enc = encodeURIComponent;
 
@@ -35,13 +35,15 @@ export function claimPage(f, q) {
       h('p', { style: 'margin-top:12px', 'data-for': forRoles('researcher', 'datause', 'engineer') }, h('b', {}, 'What is missing: '), e.calculation || 'The needed field is not in the data.')));
   } else {
     const big = h('span', { class: 'big' }, fmtNum(e.n_samples));
-    countUp(big, e.n_samples);
+    if (isRatio(f)) big.textContent = Number(e.value).toFixed(2); else countUp(big, e.n_samples);
     const lowEvents = f.guardrail_flags.includes('low_event_count');
     root.append(h('section', { class: 'card', 'aria-labelledby': 'vh' }, h('h2', { id: 'vh' }, 'Verdict'),
       h('div', { class: 'row' }, verdictBadge(f), flagChips(f)),
-      h('div', { class: 'headline', 'data-for': forRoles('researcher', 'engineer') }, big, h('span', { class: 'of' }, 'of ' + fmtNum(e.denominator)), h('span', { class: 'p' }, pct(e.n_samples, e.denominator))),
+      h('div', { class: 'headline', 'data-for': forRoles('researcher', 'engineer') }, big,
+        isRatio(f) ? [h('span', { class: 'of' }, 'to 1'), h('span', { class: 'p' }, groupsText(f))]
+          : [h('span', { class: 'of' }, 'of ' + fmtNum(e.denominator)), h('span', { class: 'p' }, pct(e.n_samples, e.denominator))]),
       h('p', { class: 'caption', style: 'margin:4px 0 8px', 'data-for': forRoles('researcher', 'engineer') }, caption(f)),
-      h('div', { class: 'muted', 'data-for': forRoles('engineer') }, 'Metric: ', h('span', { class: 'mono' }, e.metric_name || 'unknown'), ' | value ' + fmtValue(e.value))));
+      h('div', { class: 'muted', 'data-for': forRoles('engineer') }, 'Metric: ', h('span', { class: 'mono' }, e.metric_name || 'unknown'), ' | value ' + valueText(f))));
     if (lowEvents) root.append(h('div', { class: 'notice', role: 'alert', 'data-for': forRoles('datause', 'researcher') }, h('b', {}, '⚠ Low event count. '), 'Too few deaths for a stable comparison. This finding is flagged for review.'));
   }
 
@@ -87,9 +89,9 @@ function calcPanel(f) {
     h('h3', {}, 'Calculation'), h('pre', {}, e.calculation || 'No calculation text.'),
     h('h3', {}, 'Source files'),
     (e.source_files || []).length ? h('ul', { class: 'mono' }, e.source_files.map((s) => h('li', {}, s))) : h('p', { class: 'muted' }, 'No source files. Nothing was computed.'),
-    h('p', { class: 'muted' }, 'Metric ' + (e.metric_name || 'unknown') + ', value ' + fmtValue(e.value) + ', ' + fmtNum(e.n_samples) + ' of ' + plural(e.denominator, 'sample') + '.'),
+    h('p', { class: 'muted' }, 'Metric ' + (e.metric_name || 'unknown') + ', value ' + valueText(f) + ', ' + fmtNum(e.n_samples) + ' of ' + plural(e.denominator, 'sample') + '.'),
     h('button', { class: 'btn', type: 'button', onclick: async () => {
-      const txt = [f.id + ': ' + f.claim_text, 'Verdict: ' + f.verdict, 'Metric: ' + e.metric_name + ' = ' + fmtValue(e.value) + ' (' + e.n_samples + ' of ' + e.denominator + ')',
+      const txt = [f.id + ': ' + f.claim_text, 'Verdict: ' + f.verdict, 'Metric: ' + e.metric_name + ' = ' + valueText(f) + ' (' + e.n_samples + ' of ' + e.denominator + ')',
         'Calculation: ' + e.calculation, 'Sources: ' + (e.source_files || []).join(', '), 'Limitation: ' + f.limitation].join('\n');
       toast((await copyText(txt)) ? 'Calculation copied' : 'Copy failed. Select the text instead.');
     } }, 'Copy calculation'));
@@ -126,7 +128,7 @@ function robustness(f) {
   if (!r) { sec.append(h('p', { class: 'muted' }, 'No alternative rule was tested for this claim.')); return sec; }
   const body = h('div', { hidden: true, id: 'rob-body', style: 'margin-top:12px' },
     h('p', {}, h('b', {}, 'Alternative rule: '), r.alt_rule),
-    h('p', {}, h('b', {}, 'Value under it: '), fmtValue(r.alt_value), ' (main rule: ' + fmtValue(f.evidence.value) + ')'),
+    h('p', {}, h('b', {}, 'Value under it: '), valueText(f, r.alt_value), ' (main rule: ' + valueText(f) + ')'),
     h('div', { class: 'notice ' + (r.verdict_changes ? '' : 'info'), role: 'status' }, r.verdict_changes
       ? h('span', {}, h('b', {}, '⚠ The verdict changes '), 'under this rule. Treat the main result with care.')
       : h('span', {}, h('b', {}, '✓ The verdict does not change '), 'under this rule.')));

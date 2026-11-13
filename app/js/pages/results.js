@@ -1,6 +1,6 @@
 import { h } from '../util.js';
 import { state, findings, saveFilters, FLAG_TEXT, isBlocked, hasNumber } from '../state.js';
-import { verdictBadge, flagChips, headlineText, factLine, plainResult, exportButtons, forRoles } from '../ui.js';
+import { verdictBadge, flagChips, headlineText, shareText, factLine, plainResult, exportButtons, forRoles } from '../ui.js';
 import { decisionPanel } from '../decisionPanel.js';
 import { filesOf } from './claim.js';
 import { pct, plural } from '../util.js';
@@ -90,7 +90,7 @@ export function resultsPage() {
           !x.correct_value && factLine(x) ? h('div', { class: 'muted', style: 'font-size:.9rem', 'data-for': forRoles('researcher', 'datause') }, factLine(x)) : null,
           filesOf(x).length ? h('div', { class: 'muted mono', style: 'font-size:.8rem', 'data-for': forRoles('engineer') }, 'Files: ' + filesOf(x).join(', ')) : null,
           h('div', { class: 'meta' }, h('span', { class: 'chip' }, x.id), flagChips(x))),
-        h('div', { class: 'num', 'data-for': forRoles('researcher', 'engineer') }, hl ? [hl, h('small', {}, pct(x.evidence.n_samples, x.evidence.denominator))] : h('small', {}, isBlocked(x) ? 'No number' : 'No number available'))));
+        h('div', { class: 'num', 'data-for': forRoles('researcher', 'engineer') }, hl ? [hl, h('small', {}, shareText(x))] : h('small', {}, isBlocked(x) ? 'No number' : 'No number available'))));
   }
   draw();
   return root;

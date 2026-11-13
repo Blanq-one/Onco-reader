@@ -1,6 +1,6 @@
 import { h, fmtNum, fmtValue, pct, plural, store } from '../util.js';
 import { state, findings, byId, isBlocked, hasNumber, decisions, reviewStatus, FLAG_TEXT, VERDICT } from '../state.js';
-import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, factLine, stackTable, plainResult, interpTag, forRoles, auditJsonText } from '../ui.js';
+import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, shareText, valueText, isRatio, factLine, stackTable, plainResult, interpTag, forRoles, auditJsonText } from '../ui.js';
 import { decisionPanel } from '../decisionPanel.js';
 import { columnsOf, filesOf } from './claim.js';
 
@@ -11,14 +11,14 @@ const ROWS = [
   ['Claim', (f) => f.claim_text],
   ['Verdict', (f) => (isBlocked(f) ? 'Blocked' : (VERDICT[f.verdict] || {}).label || f.verdict), (f) => verdictBadge(f)],
   ['Headline', (f) => headlineText(f) || 'No number'],
-  ['Share', (f) => (hasNumber(f) ? pct(f.evidence.n_samples, f.evidence.denominator) : 'n/a')],
+  ['Share', (f) => (hasNumber(f) ? (isRatio(f) ? 'n/a (a ratio)' : pct(f.evidence.n_samples, f.evidence.denominator)) : 'n/a')],
   ['Metric', (f) => f.evidence.metric_name || 'n/a'],
-  ['Metric value', (f) => (hasNumber(f) ? fmtValue(f.evidence.value) : 'no value')],
+  ['Metric value', (f) => (hasNumber(f) ? valueText(f) : 'no value')],
   ['Cohort steps', (f) => f.cohort_trace.length ? f.cohort_trace.map((s) => s.step + ': ' + fmtNum(s.n_after)).join('; ') : 'none recorded'],
   ['Source files', (f) => (f.evidence.source_files || []).join(', ') || 'none'],
   ['Flags', (f) => f.guardrail_flags.map((x) => FLAG_TEXT[x] || x).join(', ') || 'none'],
   ['Needs review', (f) => (f.needs_human_review ? 'Yes' : 'No')],
-  ['Alternative rule', (f) => (f.robustness ? f.robustness.alt_rule + ' (' + fmtValue(f.robustness.alt_value) + ', verdict ' + (f.robustness.verdict_changes ? 'changes' : 'holds') + ')' : 'not tested')],
+  ['Alternative rule', (f) => (f.robustness ? f.robustness.alt_rule + ' (' + valueText(f, f.robustness.alt_value) + ', verdict ' + (f.robustness.verdict_changes ? 'changes' : 'holds') + ')' : 'not tested')],
   ['Calculation', (f) => f.evidence.calculation || 'n/a'],
   ['Limitation', (f) => f.limitation || 'none given'],
   ['Next actions', (f) => f.next_actions.join(' | ') || 'none'],
@@ -80,7 +80,7 @@ export function reviewPage(q) {
     h('h2', { style: 'margin-top:8px' }, f.claim_text),
     h('p', { class: 'plain' }, plainResult(f)),
     ...claimFacts(f),
-    hasNumber(f) ? h('p', {}, h('b', { 'data-for': forRoles('researcher', 'engineer') }, headlineText(f) + ' (' + pct(f.evidence.n_samples, f.evidence.denominator) + ')  '), h('a', { href: '#/claim/' + enc(f.id) + '?from=review' }, 'See the calculation and sources')) : h('p', { class: 'muted' }, 'No number for this item. ', h('a', { href: '#/claim/' + enc(f.id) + '?from=review' }, 'Open the full finding')),
+    hasNumber(f) ? h('p', {}, h('b', { 'data-for': forRoles('researcher', 'engineer') }, headlineText(f) + ' (' + shareText(f) + ')  '), h('a', { href: '#/claim/' + enc(f.id) + '?from=review' }, 'See the calculation and sources')) : h('p', { class: 'muted' }, 'No number for this item. ', h('a', { href: '#/claim/' + enc(f.id) + '?from=review' }, 'Open the full finding')),
     f.needs_human_review ? h('p', { 'data-for': forRoles('datause') }, h('b', {}, 'Why it needs review: '), f.review_reason || 'No reason given.') : null,
     f.needs_human_review ? h('p', { class: 'muted', 'data-for': forRoles('leader', 'researcher', 'engineer') }, 'A person must check this claim before it is used. The data-use reviewer view shows why.') : null,
     h('div', { class: 'limit' }, h('h2', {}, 'Limitation'), h('p', { style: 'margin:0' }, f.limitation || 'None given.')),
