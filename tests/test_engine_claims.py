@@ -447,5 +447,97 @@ class TestGeneClaimsReal(RealCase):
         self.assertEqual((f["verdict"], f["guardrail_flags"]), ("insufficient_evidence", ["data_cannot_answer"]))
 
 
+# ---------- item 5: survival comparisons and treatment wording ----------
+SURVIVAL_SENTENCES = ["ER-positive patients live longer than ER-negative patients.",
+                      "ER-negative patients die sooner.",
+                      "ER-positive tumors have better survival than ER-negative tumors.",
+                      "ER-negative tumors have worse outcomes than ER-positive tumors.",
+                      "Patients outlive expectations."]
+
+
+class TestSurvivalComparisonsSynthetic(SyntheticCase):
+    # primary tumors: ER-negative are rows 0, 4, 8, ... (10 samples) and every one of them died; ER-positive (30) none died
+
+    def test_never_skipped(self):
+        claims, skipped = E.extract_claims(" ".join(SURVIVAL_SENTENCES))
+        self.assertEqual([c["text"] for c in claims], SURVIVAL_SENTENCES)
+        self.assertEqual(skipped, [])
+
+    def test_answered_insufficient_with_deaths_per_group(self):
+        f = check(self.ctx, SURVIVAL_SENTENCES[0], self)
+        self.assertEqual(f["verdict"], "insufficient_evidence")
+        self.assertEqual(f["evidence"]["breakdown"], [{"group": "ER-positive", "n": 30, "events": 0},
+                                                      {"group": "ER-negative", "n": 10, "events": 10}])
+        self.assertIn(E.SURVIVAL_NOT_TESTED, f["evidence"]["calculation"])
+        self.assertIn("30 with survival data, 0 OS deaths", f["evidence"]["calculation"])
+        self.assertTrue(f["needs_human_review"])
+        self.assertIn("not survival differences", f["review_reason"])
+        self.assertEqual(f["guardrail_flags"], ["low_event_count"])  # both groups under 20 deaths
+        self.assertEqual(f["missing_evidence"], E.SURVIVAL_MISSING)
+        self.assertIn("survival.tsv", f["evidence"]["source_files"])
+
+    def test_one_named_group_is_compared_with_the_rest(self):
+        f = check(self.ctx, SURVIVAL_SENTENCES[1], self)
+        self.assertEqual([b["group"] for b in f["evidence"]["breakdown"]], ["ER-negative", "other ER status"])
+        self.assertEqual(f["verdict"], "insufficient_evidence")
+
+    def test_no_groups_still_shows_the_deaths(self):
+        f = check(self.ctx, SURVIVAL_SENTENCES[4], self)
+        self.assertEqual((f["verdict"], f["evidence"]["n_samples"]), ("insufficient_evidence", 40))
+        self.assertIn("10 OS deaths", f["evidence"]["calculation"])
+
+    def test_blocked_wording_stays_blocked_and_says_what_it_needs(self):
+        for text in SURVIVAL_SENTENCES[2:4]:
+            f = check(self.ctx, text, self)
+            self.assertEqual((f["verdict"], f["evidence"]["value"], f["evidence"]["n_samples"]), ("insufficient_evidence", None, 0), text)
+            self.assertIn("clinical_claim_blocked", f["guardrail_flags"])
+            self.assertEqual(f["missing_evidence"], E.SURVIVAL_MISSING_BLOCKED)
+            self.assertNotIn("Treatment-response", f["missing_evidence"])
+
+    def test_treatment_claim_names_the_real_columns(self):
+        f = check(self.ctx, "Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy.", self)
+        self.assertEqual(f["verdict"], "insufficient_evidence")
+        me = f["missing_evidence"]
+        self.assertIn("yes/no treatment flags (radiation_therapy, targeted_molecular_therapy, additional_pharmaceutical_therapy)", me)
+        self.assertIn("no hormone-therapy records and no treatment response", me)
+
+    def test_treatment_wording_follows_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_release(tmp)
+            path = os.path.join(tmp, "raw", "clinical.tsv")
+            with open(path, "w", newline="", encoding="utf-8") as fh:
+                fh.write("sampleID\tbreast_carcinoma_estrogen_receptor_status\thormone_therapy_type\n")
+                for s in PRIMARY:
+                    fh.write(f"{s}\tPositive\tTamoxifen\n")
+            f = check(E.Context(tmp), "Patients who got hormone therapy responded best to treatment.", self)
+            self.assertIn("clinical.tsv has no treatment columns", f["missing_evidence"])
+            self.assertIn("hormone-therapy columns (hormone_therapy_type)", f["missing_evidence"])
+
+
+class TestSurvivalComparisonsReal(RealCase):
+    def test_groups_and_deaths_match_pandas(self):
+        col = next(n["column_used"] for n in self.ctx.attr_notes if n["attribute"] == "ER status")
+        clin = pd.read_csv(os.path.join(DATA_DIR, "raw", "clinical.tsv"), sep="\t", low_memory=False)
+        clin = clin[clin.sampleID.str[13:15] == "01"].set_index("sampleID")
+        surv = pd.read_csv(os.path.join(DATA_DIR, "raw", "survival.tsv"), sep="\t", index_col=0)
+        status = clin[col].astype(str).str.strip().str.lower()
+        expected = []
+        for label, prefix in (("ER-positive", "pos"), ("ER-negative", "neg")):
+            ids = status.index[status.str.startswith(prefix)]
+            deaths = int((surv.reindex(ids)["OS"] == 1).sum())
+            expected.append({"group": label, "n": len(ids), "events": deaths})
+        f = self.run_claim("ER-positive patients live longer than ER-negative patients.")
+        self.assertEqual(f["verdict"], "insufficient_evidence")
+        self.assertEqual(f["evidence"]["breakdown"], expected)
+
+    def test_treatment_columns_exist_and_no_hormone_column(self):
+        header = pd.read_csv(os.path.join(DATA_DIR, "raw", "clinical.tsv"), sep="\t", nrows=0).columns
+        for c in E.TREATMENT_FLAG_COLUMNS:
+            self.assertIn(c, header)
+        self.assertEqual([c for c in header if E.HORMONE_WORDS.search(c)], [])
+        f = self.run_claim("Patients whose tumors had the highest ER-alpha protein responded best to hormone therapy.")
+        self.assertIn("no hormone-therapy records and no treatment response", f["missing_evidence"])
+
+
 if __name__ == "__main__":
     unittest.main()

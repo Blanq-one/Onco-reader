@@ -234,6 +234,7 @@ class Context:
         with open(path, newline="", encoding="utf-8", errors="replace") as fh:
             reader = csv.DictReader(fh, delimiter="\t")
             header = reader.fieldnames or []
+            self.clinical_header = list(header)
             idcol = "sampleID" if "sampleID" in header else header[0]
             rows = {r[idcol].strip()[:15]: r for r in reader}
         primary = [s for s in rows if L.is_primary(s)]
@@ -315,6 +316,16 @@ QUANT_WORDS = re.compile(r"\b(most|majority|all|every|each|nearly|almost|about|a
                          r"rarest|most frequent|only|none|enough|sufficient)\b|\d", re.I)
 
 
+# A claim that one group lives longer or does better than another. This tool never tests that; it shows the groups and their deaths.
+SURVIVAL_COMPARE = re.compile(
+    r"\b(?:live[sd]?|lived|living|survive[sd]?|surviving)\s+(?:\w+\s+){0,2}?(?:longer|shorter)\b|\boutliv\w*|"
+    r"\bdie[sd]?\s+(?:\w+\s+){0,2}?(?:sooner|earlier|faster|later|more often|less often)\b|"
+    r"\b(?:better|worse|poorer|longer|shorter|improved|reduced|superior|inferior|higher|lower)\s+(?:overall\s+)?"
+    r"(?:survival|outcomes?|prognos\w+|mortality|death rates?)\b|"
+    r"\b(?:survival|outcomes?|prognosis|mortality)\s+(?:is|are|was|were)\s+(?:\w+\s+)?(?:better|worse|poorer|longer|shorter|higher|lower)\b|"
+    r"\bsurvival (?:advantage|benefit|difference|gap)\b", re.I)
+
+
 def split_sentences(paragraph):
     t = paragraph
     for a in ABBREV:
@@ -330,6 +341,8 @@ def is_checkable(sentence):
     s = sentence
     mentions = (find_layers(s) or find_attr_mentions(s) or parse_filters(s)
                 or re.search(r"\b(?:primary )?tumou?rs?\b|\bsamples?\b|\bpatients?\b|\bcases?\b|\bsections?\b|\bmetasta\w*", s, re.I))
+    if SURVIVAL_COMPARE.search(s):  # never skipped: answered (or blocked) with the groups' deaths shown
+        return True, ""
     if CLINICAL_WORDS.search(s) and mentions:
         return True, ""
     if mentions and QUANT_WORDS.search(s):
@@ -708,6 +721,12 @@ def parse_claim(text):
     q = parse_quantifier(text)
     if q and q["kind"] == "invalid":
         return {"type": "invalid", "reading": q["reading"]}
+    if SURVIVAL_COMPARE.search(text):
+        flt = parse_filters(text)
+        tcode = sample_type_code(low)
+        return {"type": "survival_compare", "filters": flt, "attr": flt[0]["attr"] if flt else None,
+                "pop_code": tcode if tcode in ("11", "06") else "01",
+                "pop_label": SAMPLE_TYPE_LABEL[tcode if tcode in ("11", "06") else "01"]}
     genes = gene_mentions(text)
     if genes:
         return parse_gene_claim(text, genes)
@@ -1054,6 +1073,8 @@ def evaluate_claim(ctx, fid, text):
         return slidecount_finding(ctx, f, parsed)
     if parsed["type"] == "gene":
         return gene_finding(ctx, f, parsed)
+    if parsed["type"] == "survival_compare":
+        return survival_compare_finding(ctx, f, parsed)
     if "mutation" in parsed.get("targets", []) and GENEISH.search(text) and not MUTATION_DATA_WORDS.search(text):
         # Reads like a claim about a gene ("is mutated in a third of tumors") but no gene was recognised:
         # never answer it with how many tumors have mutation data.
@@ -1262,6 +1283,74 @@ def slidecount_finding(ctx, f, parsed):
     else:
         f["correct_value"] = {"value": n, "unit": "slides", "text": f"{n} {what} ({n} of {total} slides in slide_manifest.csv)"}
         f["next_actions"] = [f"Restate the count as {n} {what}."]
+    return f
+
+
+SURVIVAL_NOT_TESTED = "This tool checks data availability, not survival differences: it does not test whether one group lives longer than another."
+SURVIVAL_MISSING = ("A statistical test of the survival difference between the groups, using follow-up time, done by a statistician; "
+                    "this tool only shows how many samples, survival records and deaths each group has.")
+
+
+def survival_compare_finding(ctx, f, parsed):
+    """'ER-positive patients live longer than ER-negative patients': no verdict; the groups and their OS deaths are shown."""
+    pop = ctx.population(parsed["pop_code"])
+    key = parsed["attr"]
+    f["needs_human_review"] = True
+    f["missing_evidence"] = SURVIVAL_MISSING
+    f["next_actions"] = ["Ask a statistician to test the survival difference; this tool does not test it.",
+                         f"Check that each group has enough deaths for the comparison (this tool flags fewer than {CFG['min_events']})."]
+    if key is None:
+        with_os = [s for s in pop if ctx.os_event(s) is not None]
+        deaths = sum(1 for s in with_os if ctx.os_event(s) == 1)
+        f["evidence"].update({"metric_name": "survival_data", "value": None, "n_samples": len(with_os), "denominator": len(pop),
+                              "source_files": ["survival.tsv", "sample_manifest.csv"],
+                              "calculation": (f"{SURVIVAL_NOT_TESTED} The claim names no groups this tool can form (it reads ER, PR, HER2, stage, "
+                                              f"histology, PAM50 subtype and gender). Among {parsed['pop_label']}: {len(with_os)} of {len(pop)} have "
+                                              f"survival data, with {deaths} OS deaths.")})
+        f["cohort_trace"] = [{"step": parsed["pop_label"], "n_before": len(pop), "n_after": len(pop)},
+                             {"step": "has survival data", "n_before": len(pop), "n_after": len(with_os)}]
+        f["limitation"] = limitation_for({}, ["survival"])
+        f["review_reason"] = SURVIVAL_NOT_TESTED + " The groups being compared could not be read."
+        return f
+    if key not in ctx.attrs:
+        f["needs_human_review"], f["missing_evidence"] = False, None
+        f["evidence"]["calculation"] = f"not run: no {ATTR_SPECS[key]['label']} column was found in the clinical file"
+        f["limitation"] = f"The data cannot answer this: no {ATTR_SPECS[key]['label']} column found."
+        f["guardrail_flags"] = ["data_cannot_answer"]
+        f["next_actions"] = ["Check whether the field exists under another name in the clinical file."]
+        return f
+    named = [x for x in parsed["filters"] if x["attr"] == key]
+    groups = [(x["label"], x["test"]) for x in named]
+    if len(groups) == 1:
+        only = named[0]
+        groups.append((f"other {ATTR_SPECS[key]['label']}", lambda v, t=only["test"]: not t(v)))
+    recorded = [s for s in pop if ctx.attr(key, s) is not None]
+    rows = []
+    for label, test in groups:
+        members = [s for s in recorded if test(ctx.attr(key, s))]
+        with_os = [s for s in members if ctx.os_event(s) is not None]
+        rows.append({"group": label, "n": len(members), "with_survival": len(with_os),
+                     "events": sum(1 for s in with_os if ctx.os_event(s) == 1)})
+    in_groups = len({s for s in recorded for label, test in groups if test(ctx.attr(key, s))})
+    smallest = min(rows, key=lambda r: r["n"])
+    shown = "; ".join(f"{r['group']} {r['n']} samples, {r['with_survival']} with survival data, {r['events']} OS deaths" for r in rows)
+    f["evidence"].update({
+        "metric_name": f"survival_groups_{key}", "value": smallest["n"], "n_samples": in_groups, "denominator": len(pop),
+        "source_files": ["clinical.tsv", "survival.tsv", "sample_manifest.csv"],
+        "breakdown": [{"group": r["group"], "n": r["n"], "events": r["events"]} for r in rows],
+        "calculation": (f"{SURVIVAL_NOT_TESTED} Groups among {parsed['pop_label']} with {ATTR_SPECS[key]['label']} recorded "
+                        f"({len(recorded)} of {len(pop)}): {shown}. {attr_used_text(ctx, [key])}.")})
+    f["cohort_trace"] = [{"step": parsed["pop_label"], "n_before": len(pop), "n_after": len(pop)},
+                         {"step": f"has {ATTR_SPECS[key]['label']} recorded", "n_before": len(pop), "n_after": len(recorded)}]
+    if in_groups != len(recorded):
+        f["cohort_trace"].append({"step": "in the groups the claim names", "n_before": len(recorded), "n_after": in_groups})
+    f["limitation"] = limitation_for({"filters": parsed["filters"]}, ["survival"])
+    reasons = [SURVIVAL_NOT_TESTED + " A statistician must test the difference (for example with a log-rank test that uses follow-up time)."]
+    thin = [r for r in rows if r["events"] < CFG["min_events"]]
+    if thin:
+        f["guardrail_flags"] = ["low_event_count"]
+        reasons.append(f"{len(thin)} group(s) have fewer than {CFG['min_events']} deaths, which is thin for a survival comparison.")
+    f["review_reason"] = " ".join(reasons)
     return f
 
 
@@ -1568,8 +1657,25 @@ def split_counts(t):
 
 
 VERDICT_RANK = {"supported": 1, "insufficient_evidence": 2, "contradicted": 3}
-CLINICAL_MISSING = ("Treatment, drug-response or outcome-by-treatment records. The loaded TCGA-BRCA files hold clinical stage and receptor fields, "
-                    "survival times, and molecular layers, but no treatment or response data.")
+CLINICAL_MISSING = ("Treatment-response records. The loaded TCGA-BRCA files hold no treatment response, "
+                    "so who responded to a treatment cannot be checked.")
+SURVIVAL_MISSING_BLOCKED = ("A statistical test of the survival difference between the groups, using follow-up time, done by a statistician. "
+                            "The guardrails stopped this claim before any analysis, so no numbers are shown.")
+TREATMENT_WORDS = re.compile(r"therap|treat|drug|chemo|respon|benefit|regimen|dose", re.I)
+TREATMENT_FLAG_COLUMNS = ["radiation_therapy", "targeted_molecular_therapy", "additional_pharmaceutical_therapy"]
+HORMONE_WORDS = re.compile(r"hormon|endocrin|tamoxifen|aromatase|letrozole|anastrozole", re.I)
+
+
+def clinical_missing_text(ctx):
+    """What a treatment claim would need, stated from the clinical file's actual columns."""
+    header = getattr(ctx, "clinical_header", None)
+    if not header:
+        return CLINICAL_MISSING
+    flags = [c for c in TREATMENT_FLAG_COLUMNS if c in header]
+    hormone = [c for c in header if HORMONE_WORDS.search(c)]
+    have = f"clinical.tsv has yes/no treatment flags ({', '.join(flags)})" if flags else "clinical.tsv has no treatment columns"
+    horm = "no hormone-therapy records" if not hormone else f"hormone-therapy columns ({', '.join(hormone)}) that this tool does not read"
+    return f"Treatment-response records. {have} but {horm} and no treatment response, so who responded to a treatment cannot be checked."
 
 
 def combine_parts(parts, text):
@@ -1599,7 +1705,7 @@ def combine_parts(parts, text):
     return f
 
 
-def finalize_finding(f, source):
+def finalize_finding(f, source, ctx=None):
     # The stored source sentence can be longer than the checked claim (for example a trimmed tail),
     # so run the guardrails on the full sentence too and redact it the same way when flagged.
     guard = run_guardrails(source)
@@ -1607,8 +1713,14 @@ def finalize_finding(f, source):
     f["source_sentence"] = safe_claim_text(source, sorted(flags)) if REDACT_FLAGS & flags else source
     if f["verdict"] == "insufficient_evidence" and not f.get("missing_evidence"):
         flags = set(f["guardrail_flags"])
-        if "clinical_claim_blocked" in flags:
-            f["missing_evidence"] = CLINICAL_MISSING
+        if "clinical_claim_blocked" in flags and SURVIVAL_COMPARE.search(source) and not TREATMENT_WORDS.search(source):
+            # a blocked survival comparison is not a treatment claim: say what it would need instead
+            f["missing_evidence"] = SURVIVAL_MISSING_BLOCKED
+            f["next_actions"] = ["Rewrite it as a data question this tool can answer, for example: "
+                                 "ER-positive patients live longer than ER-negative patients (it then shows the deaths in each group).",
+                                 "Send the survival comparison itself to a statistician."]
+        elif "clinical_claim_blocked" in flags:
+            f["missing_evidence"] = clinical_missing_text(ctx)
         elif "data_cannot_answer" in flags:
             f["missing_evidence"] = (f["limitation"].replace("The data cannot answer this: ", "").rstrip(".") +
                                      ". A data field that covers this question would be needed.")
@@ -1634,7 +1746,7 @@ def evaluate_item(ctx, fid, item):
             f = blocked_finding(fid, text, guard["flags"], guard.get("reason") or "Stopped by guardrails.", total)
         else:
             f = combine_parts([evaluate_claim(ctx, fid, sub) for sub in subs], text)
-    return finalize_finding(f, source)
+    return finalize_finding(f, source, ctx)
 
 
 def audit(ctx, claims, title, skipped=None):
