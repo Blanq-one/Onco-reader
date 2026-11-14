@@ -223,6 +223,5 @@ function slideBody(r, i) {
     h('ul', { class: 'rep-claims' }, fs.map((f) => h('li', {},
       verdictBadge(f), h('p', { class: 'claim-text' }, f.claim_text), h('p', { class: 'muted' }, plainResult(f)),
       isBlocked(f) ? null : samplesPanel(f, { mask: pseudo, prefix: 'r' + i })))),
-    h('p', { class: 'muted' }, 'Data readiness only. No clinical claims. Sample names are made up for this view.'),
   ];
 }
