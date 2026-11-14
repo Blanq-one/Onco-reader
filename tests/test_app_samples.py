@@ -1,7 +1,7 @@
 """The ten example reports behind "Add the 10 example reports" (Start and the Reports page).
 
 Every file listed in app/js/pages/batch.js exists, says it is made up, and goes through the engine with
-the guardrails post-check passing (so no example fails in the carousel). The engine part needs the data
+the guardrails post-check passing (so no example fails in the Reports view). The engine part needs the data
 ($TCGA_DATA_DIR, else ../challenge-ref/data/tcga-brca) and skips without it. Standard library only.
 """
 import json

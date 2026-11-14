@@ -1,5 +1,5 @@
 // Several reports, each audited on its own. Nothing is shared between reports: separate requests, separate results.
-// File names and sample barcodes never reach the carousel (reports are "Report A, B, ..." and samples are renumbered per report).
+// File names and sample barcodes never reach the file list or the viewer (reports are "Report 1, 2, ..." and samples are renumbered per report).
 import { h, fmtNum, plural, reduceMotion, toast } from '../util.js';
 import { state, isBlocked } from '../state.js';
 import { checkHealth, auditOnly, pdfText } from '../live.js';
@@ -18,9 +18,9 @@ export function batchPage() {
   const root = h('div', { class: 'page', 'data-title': 'Multiple reports' });
   const adder = h('div', { id: 'batch-add' }), results = h('div', { id: 'batch-results' }), live = h('div', { class: 'sr', role: 'status', 'aria-live': 'polite', id: 'batch-live' });
   root.append(h('h1', {}, 'Several reports, one at a time'),
-    h('p', { class: 'lead' }, 'Add more than one report. Each is audited separately, and the results appear as slides. The reports do not share anything: no totals, no comparisons. File names and sample barcodes are hidden in the slides.'),
+    h('p', { class: 'lead' }, 'Add more than one report. Each is audited separately and shows up as a file; open one to see its results. The reports do not share anything: no totals, no comparisons. File names and sample barcodes are hidden in the viewer.'),
     adder, results, live);
-  const draw = () => { drawAdder(adder, draw); drawResults(results, live, draw); };
+  const draw = () => { drawAdder(adder, draw); drawResults(results, live); };
   root.afterMount = async () => { await checkHealth(); draw(); };
   draw();
   return root;
@@ -81,7 +81,7 @@ function drawAdder(slot, redraw) {
     state.live ? null : h('div', { class: 'notice info', role: 'status' }, 'Auditing needs the local server (python server/serve.py). It is not answering right now.'),
     h('div', { class: 'row' }, examples, h('label', { for: 'batch-file', class: 'muted' }, 'or choose files (.md, .txt, .pdf)'), file),
     h('label', { for: 'batch-paste', class: 'muted', style: 'display:block;margin-top:12px' }, 'Paste a report'), ta, h('div', { class: 'row', style: 'margin-top:8px' }, paste),
-    b.reports.length ? [h('h3', { class: 'batch-added' }, 'Added'), list, h('p', { class: 'muted' }, 'File names are shown here only so you can tell your files apart. The slides use the labels above.')] : null,
+    b.reports.length ? [h('h3', { class: 'batch-added' }, 'Added'), list, h('p', { class: 'muted' }, 'File names are shown here only so you can tell your files apart. The results use the labels above.')] : null,
     h('div', { class: 'row', style: 'margin-top:12px' }, run), status));
 }
 
@@ -99,48 +99,94 @@ async function auditAll(redraw) {
   const live = document.getElementById('batch-live'); if (live) live.textContent = 'All reports audited.';
 }
 
-// ---------- the carousel ----------
-function drawResults(slot, live, redraw) {
+// ---------- audited reports as files, opened one at a time in a viewer ----------
+let viewer = null; // { dialog, body, k, shown, opener }
+
+function fileSummary(r) {
+  if (r.status === 'working') return 'Auditing...';
+  if (r.status === 'failed') return 'Could not be audited';
+  const t = tally(r.doc.findings, isBlocked);
+  const bits = [plural(t.total, 'claim')];
+  if (t.contradicted) bits.push(t.contradicted + ' mismatch');
+  if (t.blocked) bits.push(t.blocked + ' stopped');
+  if (t.review) bits.push(t.review + ' to review');
+  return bits.join(' · ');
+}
+
+function drawResults(slot, live) {
   const b = B(), shown = b.reports.map((r, i) => ({ r, i })).filter(({ r }) => r.status !== 'waiting');
   if (!shown.length) { slot.replaceChildren(); return; }
-  const n = shown.length;
-  b.index = Math.min(b.index, n - 1);
-  const track = h('div', { class: 'car-track' });
-  const slides = shown.map(({ r, i }, k) => {
-    const s = h('article', { class: 'car-slide', role: 'group', 'aria-roledescription': 'slide', 'aria-label': reportLabel(i) + ', slide ' + (k + 1) + ' of ' + n }, slideBody(r, i));
-    track.append(s); return s;
+  const tiles = shown.map(({ r, i }, k) => {
+    const t = r.status === 'done' ? tally(r.doc.findings, isBlocked) : null;
+    const seg = (n, cls) => (n ? h('i', { class: 'seg ' + cls, style: 'flex-grow:' + n }) : null);
+    const tile = h('button', { type: 'button', class: 'file-tile ' + r.status, disabled: r.status === 'working' || null,
+      'aria-label': 'Open ' + reportLabel(i) + ': ' + fileSummary(r) },
+      h('span', { class: 'file-icon', 'aria-hidden': 'true' }, h('span', {}, String(i + 1))),
+      h('span', { class: 'file-meta' },
+        h('span', { class: 'file-name' }, reportLabel(i)),
+        h('span', { class: 'file-sub' }, fileSummary(r)),
+        t ? h('span', { class: 'vbar', 'aria-hidden': 'true' }, seg(t.supported, 'v-supported'), seg(t.contradicted, 'v-contradicted'), seg(t.insufficient, 'v-insufficient_evidence'), seg(t.blocked, 'v-blocked'))
+          : r.status === 'working' ? h('span', { class: 'progress indet', 'aria-hidden': 'true' }, h('i')) : null),
+      r.status === 'done' ? h('span', { class: 'file-open', 'aria-hidden': 'true' }, 'Open') : null);
+    tile.addEventListener('click', () => openViewer(shown, k, tile, live));
+    return tile;
   });
-  const dots = h('div', { class: 'car-dots' });
-  const go = (to, speak) => {
-    b.index = (to + n) % n;
-    track.style.transform = 'translateX(' + (-100 * b.index) + '%)';
-    slides.forEach((s, k) => { if (k === b.index) s.removeAttribute('inert'); else s.setAttribute('inert', ''); });
-    [...dots.children].forEach((d, k) => d.setAttribute('aria-current', String(k === b.index)));
-    prevBtn.disabled = n < 2; nextBtn.disabled = n < 2;
-    fit();
-    if (speak) live.textContent = reportLabel(shown[b.index].i) + ', slide ' + (b.index + 1) + ' of ' + n;
+  slot.replaceChildren(h('h2', { id: 'car-h', class: 'list-h' }, 'Audited reports'),
+    h('p', { class: 'muted files-note' }, 'Each report opens on its own. File names and sample barcodes are hidden in the viewer.'),
+    h('div', { class: 'file-grid', role: 'list' }, tiles.map((t) => h('div', { role: 'listitem' }, t))));
+  if (viewer && viewer.dialog.open) { viewer.shown = shown; showIn(viewer.k, false); }
+}
+
+function openViewer(shown, k, opener, live) {
+  if (!viewer) {
+    const body = h('div', { class: 'viewer-body' });
+    const title = h('h2', { id: 'viewer-h' });
+    const pos = h('span', { class: 'muted viewer-pos' });
+    const prev = h('button', { class: 'btn', type: 'button', 'aria-label': 'Previous report', onclick: () => showIn(viewer.k - 1, true) }, '←');
+    const next = h('button', { class: 'btn', type: 'button', 'aria-label': 'Next report', onclick: () => showIn(viewer.k + 1, true) }, '→');
+    const close = h('button', { class: 'btn viewer-close', type: 'button', onclick: () => closeViewer() }, 'Close');
+    const dialog = h('dialog', { class: 'viewer', 'aria-labelledby': 'viewer-h' },
+      h('header', { class: 'viewer-head' }, h('div', {}, h('span', { class: 'viewer-kicker' }, 'Report viewer'), title), h('div', { class: 'viewer-nav' }, pos, prev, next, close)),
+      body);
+    dialog.addEventListener('cancel', (e) => { e.preventDefault(); closeViewer(); });
+    dialog.addEventListener('click', (e) => { if (e.target === dialog) closeViewer(); }); // click on the backdrop
+    dialog.addEventListener('keydown', (e) => {
+      if (e.target.closest('textarea,input,select')) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); showIn(viewer.k + 1, true); } else if (e.key === 'ArrowLeft') { e.preventDefault(); showIn(viewer.k - 1, true); }
+    });
+    document.body.append(dialog);
+    viewer = { dialog, body, title, pos, prev, next, close, k: 0, shown: [], opener: null, live: null };
+  }
+  Object.assign(viewer, { shown, opener, live });
+  showIn(k, false);
+  viewer.dialog.classList.remove('closing');
+  viewer.dialog.showModal();
+  viewer.close.focus();
+}
+
+function showIn(k, animate) {
+  const v = viewer, n = v.shown.length;
+  v.k = ((k % n) + n) % n;
+  const { r, i } = v.shown[v.k];
+  const fill = () => {
+    v.title.textContent = reportLabel(i);
+    v.pos.textContent = (v.k + 1) + ' of ' + n;
+    v.body.replaceChildren(...slideBody(r, i).filter(Boolean));
+    v.prev.disabled = n < 2; v.next.disabled = n < 2;
+    v.body.scrollTop = 0;
+    if (animate && v.live) v.live.textContent = reportLabel(i) + ', ' + (v.k + 1) + ' of ' + n;
   };
-  const prevBtn = h('button', { class: 'btn', type: 'button', 'aria-label': 'Previous report', onclick: () => go(b.index - 1, true) }, '← Previous');
-  const nextBtn = h('button', { class: 'btn', type: 'button', 'aria-label': 'Next report', onclick: () => go(b.index + 1, true) }, 'Next →');
-  shown.forEach(({ i }, k) => dots.append(h('button', { class: 'dot', type: 'button', 'aria-label': 'Show ' + reportLabel(i), onclick: () => go(k, true) })));
-  // The viewport takes the height of the slide on show, so a short report does not leave a tall empty frame.
-  const viewport = h('div', { class: 'car-viewport' }, track);
-  const fit = () => { const s = slides[b.index]; if (s && s.offsetHeight) viewport.style.height = s.offsetHeight + 'px'; };
-  if (typeof ResizeObserver !== 'undefined') { const ro = new ResizeObserver(fit); slides.forEach((s) => ro.observe(s)); }
-  const view = h('section', { class: 'carousel', 'aria-roledescription': 'carousel', 'aria-label': 'Results for each report', tabindex: '-1' },
-    viewport,
-    h('div', { class: 'car-controls no-print' }, prevBtn, dots, nextBtn));
-  view.addEventListener('keydown', (e) => {
-    if (e.target.closest('textarea,input,select')) return;
-    if (e.key === 'ArrowRight') { e.preventDefault(); go(b.index + 1, true); } else if (e.key === 'ArrowLeft') { e.preventDefault(); go(b.index - 1, true); }
-  });
-  // swipe, ignoring drags that start on the sample lists or buttons
-  let x0 = null;
-  view.addEventListener('pointerdown', (e) => { x0 = e.target.closest('button,.ids,a,input') ? null : e.clientX; });
-  view.addEventListener('pointerup', (e) => { if (x0 != null && Math.abs(e.clientX - x0) > 50) go(b.index + (e.clientX < x0 ? 1 : -1), true); x0 = null; });
-  if (reduceMotion()) track.classList.add('still');
-  slot.replaceChildren(h('h2', { id: 'car-h', class: 'list-h' }, 'Results, one slide per report'), view);
-  go(b.index, false);
+  if (!animate || reduceMotion()) { fill(); return; }
+  v.body.classList.add('swap');
+  setTimeout(() => { fill(); v.body.classList.remove('swap'); }, 140);
+}
+
+function closeViewer() {
+  const v = viewer; if (!v || !v.dialog.open) return;
+  const done = () => { v.dialog.close(); v.dialog.classList.remove('closing'); if (v.opener && v.opener.isConnected) v.opener.focus(); };
+  if (reduceMotion()) { done(); return; }
+  v.dialog.classList.add('closing');
+  setTimeout(done, 180);
 }
 
 function slideBody(r, i) {
@@ -156,7 +202,7 @@ function slideBody(r, i) {
     h('div', { class: 'scorecard mini', role: 'group', 'aria-label': label + ' figures' },
       [['v-supported', 'Match', t.supported], ['v-contradicted', 'Mismatch', t.contradicted], ['v-insufficient_evidence', 'Cannot settle', t.insufficient], ['v-blocked', 'Stopped', t.blocked], ['review', 'Need review', t.review]]
         .map(([cls, l, v]) => h('div', { class: 'sc-cell ' + cls + (v ? '' : ' zero') }, h('span', { class: 'sc-label' }, l), h('span', { class: 'sc-value' }, String(v))))),
-    h('ul', { class: 'car-claims' }, fs.map((f) => h('li', {},
+    h('ul', { class: 'rep-claims' }, fs.map((f) => h('li', {},
       verdictBadge(f), h('p', { class: 'claim-text' }, f.claim_text), h('p', { class: 'muted' }, plainResult(f)),
       isBlocked(f) ? null : samplesPanel(f, { mask: pseudo, prefix: 'r' + i })))),
     h('p', { class: 'muted' }, 'Data readiness only. No clinical claims. Sample names are made up for this view.'),

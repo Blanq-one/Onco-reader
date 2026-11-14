@@ -1,7 +1,7 @@
 """The multiple-reports view's pure helpers (app/js/batch_logic.js), checked with Node if it is installed.
 
 Reports get anonymous labels, blocked claims are counted on their own, and sample barcodes are replaced by
-per-report pseudonyms. The page itself (carousel, keyboard, 390 px width) is checked in a browser, not here.
+per-report pseudonyms. The page itself (file list, viewer, keyboard, 390 px width) is checked in a browser, not here.
 Skips when node is not on PATH. Standard library only.
 """
 import json
@@ -24,7 +24,7 @@ class TestBatchLogic(unittest.TestCase):
         cls.r = json.loads(run.stdout.strip().splitlines()[-1])
 
     def test_labels_are_anonymous_and_ordered(self):
-        self.assertEqual(self.r["labels"], ["Report A", "Report B", "Report Z", "Report 27", "Report 28"])
+        self.assertEqual(self.r["labels"], ["Report 1", "Report 2", "Report 26", "Report 27", "Report 28"])
 
     def test_blocked_claims_are_counted_on_their_own(self):
         self.assertEqual(self.r["tally"], {"total": 5, "supported": 2, "contradicted": 1, "insufficient": 1, "blocked": 1, "review": 2})

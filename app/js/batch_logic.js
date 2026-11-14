@@ -1,7 +1,7 @@
 // Pure helpers for the multiple-reports view (no DOM), so they can be tested with Node.
 
-// "Report A", "Report B", ... "Report Z", then "Report 27" and on.
-export const reportLabel = (i) => 'Report ' + (i < 26 ? String.fromCharCode(65 + i) : String(i + 1));
+// "Report 1", "Report 2", ... in the order the reports were added.
+export const reportLabel = (i) => 'Report ' + (i + 1);
 
 // Verdict tally for one report's findings. Blocked claims are counted on their own, not as insufficient evidence.
 export function tally(findings, isBlocked) {
