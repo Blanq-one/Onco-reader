@@ -540,7 +540,7 @@ dialog.viewer { width: min(860px, calc(100% - 32px)); max-width: none; max-heigh
   background: var(--surface); color: var(--text); box-shadow: 0 24px 64px rgba(0,0,0,.45); overflow: hidden; display: none; flex-direction: column; }
 dialog.viewer[open] { display: flex; animation: viewer-in .22s cubic-bezier(.2,.8,.2,1) both; }
 dialog.viewer.closing { animation: viewer-out .18s ease both; }
-dialog.viewer::backdrop { background: rgba(5,8,12,.62); backdrop-filter: blur(3px); animation: fade-in .22s ease both; }
+dialog.viewer::backdrop { background: rgba(5,8,12,.62); animation: fade-in .22s ease both; }
 dialog.viewer.closing::backdrop { animation: fade-out .18s ease both; }
 @keyframes viewer-in { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes viewer-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px) scale(.99); } }
@@ -582,7 +582,6 @@ dialog.viewer.closing::backdrop { animation: fade-out .18s ease both; }
 .file-card { all: unset; box-sizing: border-box; flex: 0 0 168px; cursor: pointer; display: grid; justify-items: center; gap: 6px; padding: 16px 12px 14px;
   border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); text-align: center;
   transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
-.file-card:hover:not([disabled]) { transform: translateY(-3px); border-color: var(--border-strong); box-shadow: 0 10px 24px rgba(0,0,0,.25); }
 .file-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .file-card[disabled] { cursor: progress; }
 .file-sheet { position: relative; width: 58px; height: 74px; border-radius: 4px 16px 4px 4px; background: var(--surface2); border: 1px solid var(--border-strong); display: grid; align-content: end; padding: 8px; gap: 6px; }
@@ -614,34 +613,14 @@ html.viewer-open, html.viewer-open body { overflow: hidden; }
 /* The motion gate (js/fx/motion.js keeps class "fx" on <html> only while motion is allowed) */
 html:not(.fx) *, html:not(.fx) *::before, html:not(.fx) *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
 
-/* controls: four distinct symbols, 44px, state by glyph and fill (not colour alone) */
-.dw-controls { display: flex; gap: 4px; align-items: center; }
 .dw-ico { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer;
   transition: transform .2s var(--ease-soft), background-color .3s, color .3s, box-shadow .3s, border-color .3s; }
 .dw-ico .i { width: 22px; height: 22px; }
 .dw-ico:hover { transform: translateY(-1px); border-color: var(--accent); }
 .dw-ico:active { transform: scale(.94); }
-.dw-ico[aria-pressed="true"] { color: var(--text); background: rgba(var(--glow-rgb), .14); border-color: rgba(var(--glow-rgb), .55); box-shadow: 0 0 14px rgba(var(--glow-rgb), .22); }
-.dw-ico[aria-pressed="false"] { opacity: .75; }
-.dw-ico .off-only { display: none; }
-.dw-ico[aria-pressed="false"] .on-only { display: none; }
-.dw-ico[aria-pressed="false"] .off-only { display: inline; }
-#dw-quiet .on-only, #dw-quiet .off-only { display: inline; }
 
-/* ambient layer: a few slow motes behind everything, decorative only */
-.dw-field { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; opacity: .55; }
-html:not(.fx) .dw-field, html[data-fx="off"] .dw-field { display: none; }
 #banner-slot, #crumbs-slot, main, .foot { position: relative; z-index: 1; }
 .topbar { z-index: 20; } .verify-bar { z-index: 15; }
-/* a soft light that follows the pointer */
-.dw-lantern::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0;
-  background: radial-gradient(circle 320px at var(--mx, 50%) var(--my, 50%), rgba(var(--glow-rgb), .07), transparent 70%); transition: opacity .8s; }
-html[data-pointer].fx:not([data-fx="off"]) .dw-lantern::after { opacity: 1; }
-/* a quiet glow at the top of the page and a gradient hairline under the bar */
-body { background-image: radial-gradient(1200px 420px at 50% -180px, rgba(var(--glow-rgb), .09), transparent 70%); background-repeat: no-repeat; }
-.topbar { backdrop-filter: saturate(140%) blur(10px); background: color-mix(in srgb, var(--bg) 82%, transparent); }
-.topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(90deg, transparent, rgba(var(--glow-rgb), .55), transparent); }
-.verify-bar { backdrop-filter: blur(8px); background: color-mix(in srgb, var(--bg) 86%, transparent); }
 
 /* softer page and block transitions */
 .page-enter { animation: enter-soft var(--dur-soft) var(--ease-soft) both; }
@@ -649,12 +628,8 @@ body { background-image: radial-gradient(1200px 420px at 50% -180px, rgba(var(--
 html.fx [data-reveal] { transition: opacity .6s var(--ease-soft), transform .6s var(--ease-soft); transition-delay: calc(var(--i, 0) * var(--reveal-stagger)); }
 html.fx [data-reveal]:not(.is-in) { opacity: 0; transform: translate3d(0, var(--reveal-distance), 0); }
 .btn, .card, .sc-cell, .issues-t tr, .claim-link, .file-card, .reco { transition: background-color .35s var(--ease-soft), border-color .35s var(--ease-soft), box-shadow .35s var(--ease-soft), transform .35s var(--ease-soft), color .35s var(--ease-soft); }
-.btn:hover { box-shadow: 0 4px 14px rgba(0,0,0,.18); }
-.btn.primary { background-image: linear-gradient(180deg, rgba(255,255,255,.14), transparent); box-shadow: 0 6px 18px rgba(var(--glow-rgb), .25); }
-.btn.primary:hover { box-shadow: 0 8px 24px rgba(var(--glow-rgb), .35); transform: translateY(-1px); }
 
 /* figures: values rise in one after another; the bars grow from the left */
-.scorecard { box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 12px 30px rgba(0,0,0,.18); }
 html.fx .sc-value { animation: rise .7s var(--ease-soft) both; }
 html.fx .sc-cell:nth-child(2) .sc-value { animation-delay: .05s; } html.fx .sc-cell:nth-child(3) .sc-value { animation-delay: .1s; }
 html.fx .sc-cell:nth-child(4) .sc-value { animation-delay: .15s; } html.fx .sc-cell:nth-child(5) .sc-value { animation-delay: .2s; }
@@ -662,32 +637,19 @@ html.fx .sc-cell:nth-child(6) .sc-value { animation-delay: .25s; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 html.fx .vbar, html.fx .hv-bar { transform-origin: 0 50%; animation: grow .9s var(--ease-soft) both .15s; }
 @keyframes grow { from { transform: scaleX(0); } to { transform: none; } }
-.sc-cell.v-contradicted:not(.zero) .sc-value { text-shadow: 0 0 18px rgba(242,120,109,.35); }
-/* the recommendation and the decision panel carry a faint glow in their step colour */
-.reco, .decision-panel { position: relative; overflow: hidden; }
-.reco::before, .decision-panel::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(600px 160px at 0 0, rgba(var(--glow-rgb), .08), transparent 70%); }
-.reco.step-fix::before, .decision-panel.step-fix::before { background: radial-gradient(600px 160px at 0 0, rgba(242,120,109,.10), transparent 70%); }
-.reco.step-proceed::before, .decision-panel.step-proceed::before { background: radial-gradient(600px 160px at 0 0, rgba(79,199,138,.10), transparent 70%); }
-.reco.step-narrow::before, .reco.step-proceed_review::before { background: radial-gradient(600px 160px at 0 0, rgba(227,179,65,.10), transparent 70%); }
 .issues-t tbody tr:hover td { background: var(--surface2); }
-.file-card.done:hover .file-sheet { box-shadow: 0 0 18px rgba(var(--glow-rgb), .35); }
-.file-sheet { transition: box-shadow .4s var(--ease-soft), transform .4s var(--ease-soft); }
-.file-card.done:hover .file-sheet { transform: rotate(-3deg) translateY(-2px); }
 
 /* softer viewer */
 dialog.viewer[open] { animation: viewer-in .42s var(--ease-soft) both; }
 dialog.viewer.closing { animation: viewer-out .28s var(--ease-soft) both; }
-dialog.viewer::backdrop { animation: fade-in .42s ease both; backdrop-filter: blur(6px); }
+dialog.viewer::backdrop { animation: fade-in .42s ease both; backdrop-filter: none; background: rgba(5,8,12,.6); }
 dialog.viewer.closing::backdrop { animation: fade-out .28s ease both; }
 @keyframes viewer-in { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes viewer-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(8px) scale(.985); } }
 .viewer-body { transition: opacity .22s var(--ease-soft), transform .22s var(--ease-soft); }
 .viewer-body.swap { opacity: 0; transform: translateX(10px); }
 .strip-track { transition: transform .6s var(--ease-soft); }
-@media (max-width: 640px) { .dw-controls { flex-wrap: wrap; } }
-@media (prefers-reduced-motion: reduce) { .dw-field, .dw-lantern::after { display: none; } }
 .theme-ico { color: var(--text); }
-.role-switch > label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .topbar nav a { padding: 6px 8px; font-size: .94rem; }
-@media (max-width: 640px) { .role-switch > label { position: static; width: auto; height: auto; clip: auto; } }
-@media print { [data-reveal] { opacity: 1 !important; transform: none !important; } .dw-field, .dw-controls, .dw-lantern::after { display: none !important; } }
+@media print { [data-reveal] { opacity: 1 !important; transform: none !important; } }
+.file-card:hover:not([disabled]) { border-color: var(--border-strong); background: var(--surface2); }
