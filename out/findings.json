@@ -374,7 +374,11 @@
         "text": "65.5% (529 of 808)"
       },
       "missing_evidence": null,
-      "source_sentence": "Protein data covers nearly all ER-positive tumors."
+      "source_sentence": "Protein data covers nearly all ER-positive tumors.",
+      "suggested_correction": {
+        "text": "The data shows 65.5% (529 of 808).",
+        "basis": "Written from the measured value. The sentence has no single number that can be swapped for it safely."
+      }
     },
     {
       "id": "claim-005",
@@ -626,7 +630,11 @@
         "text": "99.7% (1098 of 1101)"
       },
       "missing_evidence": null,
-      "source_sentence": "Every tumor sample has a matching pathology slide."
+      "source_sentence": "Every tumor sample has a matching pathology slide.",
+      "suggested_correction": {
+        "text": "The data shows 99.7% (1098 of 1101).",
+        "basis": "Written from the measured value. The sentence has no single number that can be swapped for it safely."
+      }
     },
     {
       "id": "claim-009",

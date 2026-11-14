@@ -367,7 +367,11 @@
         "text": "49.9% (421 of 844)"
       },
       "missing_evidence": null,
-      "source_sentence": "Luminal A is the largest RNA subtype, accounting for about 62% of primary tumors with an RNA subtype call."
+      "source_sentence": "Luminal A is the largest RNA subtype, accounting for about 62% of primary tumors with an RNA subtype call.",
+      "suggested_correction": {
+        "text": "Luminal A is the largest RNA subtype, accounting for about 49.9% of primary tumors with an RNA subtype call.",
+        "basis": "The sentence says 62%; the data shows 49.9% (421 of 844). Only that number was replaced, so the rest of the wording is the author's."
+      }
     },
     {
       "id": "claim-003",

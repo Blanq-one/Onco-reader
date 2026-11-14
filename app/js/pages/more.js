@@ -1,6 +1,6 @@
-import { h, fmtNum, fmtValue, pct, plural, store } from '../util.js';
+import { h, fmtNum, fmtValue, pct, plural, store, copyText, toast } from '../util.js';
 import { state, findings, byId, isBlocked, hasNumber, decisions, reviewStatus, FLAG_TEXT, VERDICT, saveFilters } from '../state.js';
-import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, shareText, valueText, isRatio, factLine, stackTable, plainResult, interpTag, forRoles, auditJsonText, sourceLine, scorecard, issuesTable } from '../ui.js';
+import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, shareText, suggestionLabel, correctionsOf, correctionsText, valueText, isRatio, factLine, stackTable, plainResult, interpTag, forRoles, auditJsonText, sourceLine, scorecard, issuesTable } from '../ui.js';
 import { decisionPanel } from '../decisionPanel.js';
 import { columnsOf, filesOf } from './claim.js';
 
@@ -127,6 +127,18 @@ export function summaryPage(q) {
       h('div', { class: 'muted' }, 'Limitation: ' + (f.limitation || 'none given')),
       f.needs_human_review ? h('div', { 'data-for': forRoles('datause') }, 'Review reason: ' + (f.review_reason || 'none given')) : null,
       h('div', { class: 'mono muted', 'data-for': forRoles('engineer') }, 'Files: ' + (filesOf(f).join(', ') || 'none') + (columnsOf(f).length ? '. Columns: ' + columnsOf(f).join(', ') : ''))))));
+
+  // Suggested wording for every contradicted claim, to hand back to the author
+  const fixes = correctionsOf(all);
+  root.append(h('section', { class: 'card', 'aria-labelledby': 'fix-h', id: 'corrections' }, h('h2', { id: 'fix-h' }, 'Corrections for the author ', suggestionLabel()),
+    fixes.length ? [
+      h('p', { class: 'muted' }, 'Each line is the claim reworded from the measured value. The author decides whether to use it.'),
+      h('ol', { class: 'fixes' }, fixes.map((f) => h('li', {},
+        h('div', { class: 'muted' }, 'Instead of: ', link(f, String(f.source_sentence || f.claim_text))),
+        h('div', {}, h('b', {}, 'Suggested: '), f.suggested_correction.text),
+        f.suggested_correction.basis ? h('div', { class: 'muted' }, f.suggested_correction.basis) : null))),
+      h('button', { class: 'btn no-print', type: 'button', onclick: async () => { toast((await copyText(correctionsText(all))) ? 'All corrections copied' : 'Copy failed. Select the text instead.'); } }, 'Copy all')]
+      : h('p', { class: 'muted' }, 'No claim was contradicted, so there is nothing to correct.')));
 
   root.append(checksumCard(d));
 

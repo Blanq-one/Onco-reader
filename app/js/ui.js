@@ -1,4 +1,4 @@
-import { h, sv, pct, fmtNum, fmtValue, plural, toast } from './util.js';
+import { h, sv, pct, fmtNum, fmtValue, plural, toast, copyText } from './util.js';
 import { VERDICT, FLAG_TEXT, isBlocked, cannotAnswer, hasNumber, decisions, decide, decisionAllowed, BLOCKED_OVERRIDE_ERROR, reviewStatus, reviewJson, state, dataUrl, minGroup, minEvents, effectiveVerdict } from './state.js';
 import { nextStepExport, analyse, STEPS } from './decision.js';
 
@@ -333,12 +333,29 @@ export function reviewChip(f) {
 }
 
 // Source sentence, correct value, missing evidence and sub-checks for one claim.
+// Suggested wording for a contradicted claim (engine: suggested_correction). Shown under the correct value, never as a finding.
+export const suggestionLabel = () => h('span', { class: 'interp', title: 'Worded from the measured value, not a finding itself' }, 'Interpretation: suggested wording');
+export function suggestedWording(f) {
+  const s = f.suggested_correction;
+  if (!s || !s.text) return null;
+  return h('section', { class: 'card fact', 'aria-label': 'Suggested wording', 'data-for': forRoles('researcher') },
+    h('h2', {}, 'Suggested wording ', suggestionLabel()),
+    h('p', { class: 'fact-v', id: 'sugg-' + f.id }, s.text),
+    s.basis ? h('p', { class: 'muted' }, s.basis) : null,
+    h('button', { class: 'btn', type: 'button', onclick: async () => { toast((await copyText(s.text)) ? 'Suggested wording copied' : 'Copy failed. Select the text instead.'); } }, 'Copy wording'));
+}
+export const correctionsOf = (list) => list.filter((f) => f.suggested_correction && f.suggested_correction.text);
+export function correctionsText(list) {
+  return correctionsOf(list).map((f, i) => (i + 1) + '. Instead of: ' + String(f.source_sentence || f.claim_text) + '\n   Suggested: ' + f.suggested_correction.text).join('\n');
+}
+
 export function claimFacts(f) {
   const out = [];
   const subs = f.sub_checks || (f.evidence && f.evidence.sub_checks) || [];
   if (f.source_sentence) out.push(h('section', { class: 'card', 'aria-label': 'Source sentence' }, h('h2', {}, 'Source sentence'), h('blockquote', { class: 'src' }, f.source_sentence)));
   if (f.correct_value && (f.correct_value.text || f.correct_value.value != null)) out.push(h('section', { class: 'card fact bad', 'aria-label': 'Correct value', 'data-for': forRoles('researcher') }, h('h2', {}, 'Correct value from the data'),
     h('p', { class: 'fact-v' }, f.correct_value.text || (f.correct_value.value + ' ' + (f.correct_value.unit || '')))));
+  { const sw = suggestedWording(f); if (sw) out.push(sw); }
   if (f.missing_evidence) out.push(h('section', { class: 'card fact warn', 'aria-label': 'Missing evidence', 'data-for': forRoles('researcher', 'datause', 'engineer') }, h('h2', {}, 'Data that would be needed'), h('p', { style: 'margin:0' }, f.missing_evidence)));
   if (subs.length) out.push(h('section', { class: 'card', 'aria-label': 'Parts of this sentence', 'data-for': forRoles('researcher') }, h('h2', {}, 'This sentence has ' + plural(subs.length, 'part')),
     h('ul', { class: 'subs' }, subs.map((s) => h('li', {}, verdictBadge({ verdict: s.verdict, guardrail_flags: [] }), h('span', {}, ' ' + s.claim),

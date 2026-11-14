@@ -1999,6 +1999,64 @@ def finalize_finding(f, source, ctx=None):
     return f
 
 
+# ---------- suggested wording for a contradicted claim (deterministic, no AI) ----------
+PERCENT_TOKEN = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(\s?(?:%|percent|per cent))", re.I)
+COUNT_TOKEN = re.compile(r"(?<![\w.,/-])(\d{1,3}(?:,\d{3})+|\d+)(?![\w%/-]|\.\d|,\d)")
+RATIO_TOKEN = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)(\s+to\s+)(one|1)\b", re.I)
+RANGE_NUMBERS = re.compile(r"\d+(?:\.\d+)?\s*(?:%|percent)?\s*(?:-|\u2013|to|and)\s*\d+(?:\.\d+)?\s*(?:%|percent)", re.I)
+# a number said with one of these is a bar or a bound, so swapping in the measured value could make the sentence false
+BOUND_WORDS = re.compile(r"(?:\b(?:over|under|above|below|beyond|exceed\w*|more than|less than|fewer than|greater than|"
+                         r"at least|at most|up to|no more than|no fewer than|minimum|maximum|least|most|between|from)\b|[<>\u2265\u2264])\s*(?:about |around |roughly |approximately )?$", re.I)
+BRACKET_MARK = re.compile(r"\[[^\]]*(?:withheld|removed|redacted)[^\]]*\]", re.I)
+
+
+def _plain_number(v):
+    return f"{v:g}" if isinstance(v, float) else str(v)
+
+
+def suggest_correction(f):
+    """For a contradicted finding: {"text", "basis"} or None.
+    If the sentence holds exactly one number of the right kind (a percentage, a count or a ratio) and it appears once,
+    that number is swapped for the measured value. Otherwise the suggestion is a plain statement of the measured value.
+    Never for blocked or insufficient-evidence findings. Built from the stored (already redacted) source sentence."""
+    cv = f.get("correct_value")
+    if f.get("verdict") != "contradicted" or not isinstance(cv, dict) or not cv.get("text"):
+        return None
+    statement = OrderedDict([("text", "The data shows " + cv["text"] + "."),
+                             ("basis", "Written from the measured value. The sentence has no single number that can be swapped for it safely.")])
+    sentence = (f.get("source_sentence") or f.get("claim_text") or "").strip()
+    parts = f["evidence"].get("sub_checks") or []
+    if not sentence or BRACKET_MARK.search(sentence) or sum(1 for p in parts if p.get("verdict") == "contradicted") > 1:
+        return statement   # redacted or withheld text is never reused; two wrong parts need two answers
+    unit, value = cv.get("unit"), cv.get("value")
+    if unit == "percent":
+        toks = list(PERCENT_TOKEN.finditer(sentence))
+        make = lambda m: _plain_number(value) + m.group(2)
+        wrong = lambda m: m.group(0)
+        other_numbers = False
+    elif unit == "ratio":
+        toks = list(RATIO_TOKEN.finditer(sentence))
+        make = lambda m: f"{value:.1f}" + m.group(2) + m.group(3)
+        wrong = lambda m: m.group(0)
+        other_numbers = False
+    elif isinstance(value, int) and not isinstance(value, bool):
+        toks = [m for m in COUNT_TOKEN.finditer(sentence) if not re.fullmatch(r"(?:19|20)\d\d", m.group(1))]
+        make = lambda m: (f"{value:,}" if "," in m.group(1) else str(value))
+        wrong = lambda m: m.group(1)
+        other_numbers = len(toks) != 1
+    else:
+        return statement
+    if len(toks) != 1 or other_numbers or RANGE_NUMBERS.search(sentence):
+        return statement
+    m = toks[0]
+    if sentence.count(wrong(m)) != 1 or BOUND_WORDS.search(sentence[:m.start()][-28:]):
+        return statement
+    a, b = (m.start(), m.end()) if unit in ("percent", "ratio") else (m.start(1), m.end(1))   # a count swaps only its digits
+    new = sentence[:a] + make(m) + sentence[b:]
+    return OrderedDict([("text", new),
+                        ("basis", f"The sentence says {wrong(m).strip()}; the data shows {cv['text']}. Only that number was replaced, so the rest of the wording is the author's.")])
+
+
 REVIEWER_NOTE = {"edited": "A reviewer edited this claim before the audit; it was checked as the reviewer worded it.",
                  "added": "A reviewer added this claim before the audit; it was not in the extracted list."}
 
@@ -2028,7 +2086,11 @@ def evaluate_item(ctx, fid, item):
             f = blocked_finding(fid, text, guard["flags"], guard.get("reason") or "Stopped by guardrails.", total)
         else:
             f = combine_parts([evaluate_claim(ctx, fid, sub) for sub in subs], text)
-    return mark_reviewer_origin(finalize_finding(f, source, ctx), origin)
+    f = finalize_finding(f, source, ctx)
+    sug = suggest_correction(f)
+    if sug:
+        f["suggested_correction"] = sug
+    return mark_reviewer_origin(f, origin)
 
 
 def audit(ctx, claims, title, skipped=None):
