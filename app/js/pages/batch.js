@@ -102,38 +102,54 @@ async function auditAll(redraw) {
 // ---------- audited reports as files, opened one at a time in a viewer ----------
 let viewer = null; // { dialog, body, k, shown, opener }
 
-function fileSummary(r) {
-  if (r.status === 'working') return 'Auditing...';
-  if (r.status === 'failed') return 'Could not be audited';
-  const t = tally(r.doc.findings, isBlocked);
-  const bits = [plural(t.total, 'claim')];
-  if (t.contradicted) bits.push(t.contradicted + ' mismatch');
-  if (t.blocked) bits.push(t.blocked + ' stopped');
-  if (t.review) bits.push(t.review + ' to review');
-  return bits.join(' · ');
-}
-
 function drawResults(slot, live) {
   const b = B(), shown = b.reports.map((r, i) => ({ r, i })).filter(({ r }) => r.status !== 'waiting');
   if (!shown.length) { slot.replaceChildren(); return; }
-  const tiles = shown.map(({ r, i }, k) => {
-    const t = r.status === 'done' ? tally(r.doc.findings, isBlocked) : null;
-    const seg = (n, cls) => (n ? h('i', { class: 'seg ' + cls, style: 'flex-grow:' + n }) : null);
-    const tile = h('button', { type: 'button', class: 'file-tile ' + r.status, disabled: r.status === 'working' || null,
-      'aria-label': 'Open ' + reportLabel(i) + ': ' + fileSummary(r) },
-      h('span', { class: 'file-icon', 'aria-hidden': 'true' }, h('span', {}, String(i + 1))),
-      h('span', { class: 'file-meta' },
-        h('span', { class: 'file-name' }, reportLabel(i)),
-        h('span', { class: 'file-sub' }, fileSummary(r)),
-        t ? h('span', { class: 'vbar', 'aria-hidden': 'true' }, seg(t.supported, 'v-supported'), seg(t.contradicted, 'v-contradicted'), seg(t.insufficient, 'v-insufficient_evidence'), seg(t.blocked, 'v-blocked'))
-          : r.status === 'working' ? h('span', { class: 'progress indet', 'aria-hidden': 'true' }, h('i')) : null),
-      r.status === 'done' ? h('span', { class: 'file-open', 'aria-hidden': 'true' }, 'Open') : null);
-    tile.addEventListener('click', () => openViewer(shown, k, tile, live));
-    return tile;
+  // Closed files: only the number and whether it is ready. The results stay hidden until a file is opened.
+  const state_ = (r) => (r.status === 'working' ? 'Auditing...' : r.status === 'failed' ? 'Could not be audited' : 'Ready to open');
+  const cards = shown.map(({ r, i }, k) => {
+    const card = h('button', { type: 'button', class: 'file-card ' + r.status, disabled: r.status === 'working' || null,
+      'aria-label': reportLabel(i) + ', ' + state_(r).toLowerCase() + (r.status === 'done' ? '. Opens the report viewer.' : '') },
+      h('span', { class: 'file-sheet', 'aria-hidden': 'true' }, h('span', { class: 'file-num' }, String(i + 1)), h('span', { class: 'file-lines' }, h('i'), h('i'), h('i'))),
+      h('span', { class: 'file-name' }, reportLabel(i)),
+      h('span', { class: 'file-state' }, state_(r)));
+    card.addEventListener('click', () => openViewer(shown, k, card, live));
+    return card;
   });
-  slot.replaceChildren(h('h2', { id: 'car-h', class: 'list-h' }, 'Audited reports'),
-    h('p', { class: 'muted files-note' }, 'Each report opens on its own. File names and sample barcodes are hidden in the viewer.'),
-    h('div', { class: 'file-grid', role: 'list' }, tiles.map((t) => h('div', { role: 'listitem' }, t))));
+  // A one-row carousel moved by its arrows (no scroll bar): it shows as many files as fit.
+  const track = h('div', { class: 'strip-track' }, cards);
+  const win = h('div', { class: 'strip-window' }, track);
+  const pos = h('span', { class: 'muted strip-pos', 'aria-live': 'polite' });
+  const prev = h('button', { class: 'btn', type: 'button', 'aria-label': 'Earlier reports' }, '←');
+  const next = h('button', { class: 'btn', type: 'button', 'aria-label': 'Later reports' }, '→');
+  b.strip = b.strip || 0;
+  const step = () => (cards[1] ? cards[1].offsetLeft - cards[0].offsetLeft : (cards[0] ? cards[0].offsetWidth : 1));
+  const perView = () => Math.max(1, Math.floor((win.clientWidth + 12) / step()));
+  const move = (to) => {
+    const max = Math.max(0, cards.length - perView());
+    b.strip = Math.max(0, Math.min(max, to));
+    track.style.transform = 'translateX(' + (-b.strip * step()) + 'px)';
+    cards.forEach((c, k) => { const vis = k >= b.strip && k < b.strip + perView(); c.tabIndex = vis ? 0 : -1; c.setAttribute('aria-hidden', vis ? 'false' : 'true'); });
+    prev.disabled = b.strip === 0; next.disabled = b.strip >= max;
+    pos.textContent = cards.length > perView() ? (b.strip + 1) + ' to ' + Math.min(cards.length, b.strip + perView()) + ' of ' + cards.length : cards.length + ' of ' + cards.length;
+  };
+  prev.onclick = () => move(b.strip - perView());
+  next.onclick = () => move(b.strip + perView());
+  win.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); move(b.strip + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); move(b.strip - 1); }
+  });
+  let x0 = null;
+  win.addEventListener('pointerdown', (e) => { x0 = e.clientX; });
+  win.addEventListener('pointerup', (e) => { if (x0 != null && Math.abs(e.clientX - x0) > 40) move(b.strip + (e.clientX < x0 ? 1 : -1) * perView()); x0 = null; });
+  if (reduceMotion()) track.classList.add('still');
+  slot.replaceChildren(
+    h('div', { class: 'strip-head' }, h('h2', { id: 'car-h', class: 'list-h' }, 'Audited reports'), h('div', { class: 'strip-nav' }, pos, prev, next)),
+    h('p', { class: 'muted files-note' }, 'Each report is a closed file. Open one to see its results. File names and sample barcodes stay hidden.'),
+    h('section', { class: 'strip', 'aria-roledescription': 'carousel', 'aria-label': 'Audited reports' }, win));
+  requestAnimationFrame(() => move(b.strip));
+  // After the viewer closes: bring the file that was on show into view and give it focus.
+  b.revealCard = (k) => { if (k < b.strip || k >= b.strip + perView()) move(k - Math.floor((perView() - 1) / 2)); return cards[k]; };
+  if (!slot._resize) { slot._resize = true; window.addEventListener('resize', () => { const t = slot.querySelector('.strip-track'); if (t) drawResults(slot, live); }); }
   if (viewer && viewer.dialog.open) { viewer.shown = shown; showIn(viewer.k, false); }
 }
 
@@ -160,6 +176,7 @@ function openViewer(shown, k, opener, live) {
   Object.assign(viewer, { shown, opener, live });
   showIn(k, false);
   viewer.dialog.classList.remove('closing');
+  document.documentElement.classList.add('viewer-open'); // the page behind does not scroll while the viewer is open
   viewer.dialog.showModal();
   viewer.close.focus();
 }
@@ -183,7 +200,8 @@ function showIn(k, animate) {
 
 function closeViewer() {
   const v = viewer; if (!v || !v.dialog.open) return;
-  const done = () => { v.dialog.close(); v.dialog.classList.remove('closing'); if (v.opener && v.opener.isConnected) v.opener.focus(); };
+  const done = () => { v.dialog.close(); v.dialog.classList.remove('closing'); document.documentElement.classList.remove('viewer-open');
+    const card = B().revealCard ? B().revealCard(v.k) : v.opener; if (card && card.isConnected) card.focus(); };
   if (reduceMotion()) { done(); return; }
   v.dialog.classList.add('closing');
   setTimeout(done, 180);
