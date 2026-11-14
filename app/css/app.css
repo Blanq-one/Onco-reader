@@ -552,3 +552,5 @@ table.cmp td.diff { background: transparent; box-shadow: inset 2px 0 var(--warn)
 @media (max-width: 640px) { .sc-label { white-space: normal; letter-spacing: .05em; } }
 .card.example.secondary h2 { font-size: .75rem; }
 .start-multi { margin-left: auto; font-size: .9rem; }
+.sc-label { overflow-wrap: normal; word-break: normal; }
+.sc-cell.zero .sc-value { color: var(--muted) !important; }

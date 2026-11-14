@@ -47,7 +47,7 @@ function bucketCounts(all) { const n = {}; BUCKETS.forEach(([v]) => { n[v] = all
 // The scorecard: the counts a judge needs, as one row of figures. Each figure filters the claim list.
 export function scorecard(all, onPick) {
   const n = bucketCounts(all), rp = reviewProgress();
-  const cell = (cls, label, value, pick, sub) => h('button', { type: 'button', class: 'sc-cell ' + cls, onclick: () => onPick && onPick(pick) },
+  const cell = (cls, label, value, pick, sub) => h('button', { type: 'button', class: 'sc-cell ' + cls + (value === '0' ? ' zero' : ''), onclick: () => onPick && onPick(pick) },
     h('span', { class: 'sc-label' }, label), h('span', { class: 'sc-value' }, value), sub ? h('span', { class: 'sc-sub' }, sub) : null);
   return h('section', { class: 'scorecard', 'aria-label': 'Audit figures' },
     cell('total', 'Claims checked', String(all.length), {}),

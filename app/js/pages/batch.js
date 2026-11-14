@@ -8,7 +8,10 @@ import { samplesPanel } from '../samples.js';
 import { reportLabel, tally, pseudonymizer } from '../batch_logic.js';
 
 const MAX_REPORTS = 10, MAX_CHARS = 100000;
-const SAMPLES = [['practice_brief.md', 'Practice brief'], ['report_b.md', 'Report B'], ['report_c.md', 'Report C']];
+// The example reports (app/samples). Ten, the most the view takes at once.
+export const SAMPLES = [['practice_brief.md', 'Practice brief'], ['report_b.md', 'Data coverage'], ['report_c.md', 'Subtypes and mutations'],
+  ['report_d.md', 'Clinical fields'], ['report_e.md', 'Sample types'], ['report_f.md', 'Survival follow-up'], ['report_g.md', 'RNA subtypes'],
+  ['report_h.md', 'Mutation data'], ['report_i.md', 'Multi-omics overlap'], ['report_j.md', 'Study feasibility']];
 const B = () => (state.batch = state.batch || { reports: [], index: 0, busy: false });
 
 export function batchPage() {
@@ -48,14 +51,15 @@ function drawAdder(slot, redraw) {
     if (bad) say(plural(bad, 'file') + ' could not be added (use .md, .txt or .pdf, and keep each under the size limit).', 'err');
     else if (n) say('Added ' + plural(n, 'report') + '.');
   });
-  const examples = h('button', { class: 'btn', type: 'button', id: 'batch-examples' }, 'Add the three example reports');
+  const examples = h('button', { class: 'btn', type: 'button', id: 'batch-examples' }, 'Add the ' + SAMPLES.length + ' example reports');
   examples.onclick = async () => {
     examples.disabled = true; say('Loading the examples...');
     try {
+      b.reports = b.reports.filter((r) => !r.example); // adding them again replaces them instead of doubling up
       for (const [f, label] of SAMPLES) {
         const r = await fetch(new URL('../../samples/' + f, import.meta.url).href);
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        add(await r.text(), label);
+        if (add(await r.text(), label)) b.reports[b.reports.length - 1].example = true;
       }
       redraw();
     } catch (e) { say('The example reports could not be loaded.', 'err'); examples.disabled = false; }
@@ -71,6 +75,8 @@ function drawAdder(slot, redraw) {
   const run = h('button', { class: 'btn primary', type: 'button', id: 'batch-run', disabled: (!b.reports.length || b.busy || !state.live) || null },
     b.busy ? 'Auditing...' : 'Audit ' + (b.reports.length > 1 ? 'all ' + b.reports.length + ' reports' : 'the report'));
   run.onclick = () => auditAll(redraw);
+  // Arriving from Start with "Add the 10 example reports": load them once.
+  if (state.batchPreset === 'examples') { state.batchPreset = null; setTimeout(() => examples.click(), 0); }
   slot.replaceChildren(h('section', { class: 'card', 'aria-labelledby': 'batch-h' }, h('h2', { id: 'batch-h' }, 'Add reports'),
     state.live ? null : h('div', { class: 'notice info', role: 'status' }, 'Auditing needs the local server (python server/serve.py). It is not answering right now.'),
     h('div', { class: 'row' }, examples, h('label', { for: 'batch-file', class: 'muted' }, 'or choose files (.md, .txt, .pdf)'), file),
@@ -149,7 +155,7 @@ function slideBody(r, i) {
       seg(t.supported, 'v-supported', 'supported'), seg(t.contradicted, 'v-contradicted', 'contradicted'), seg(t.insufficient, 'v-insufficient_evidence', 'insufficient evidence'), seg(t.blocked, 'v-blocked', 'blocked')),
     h('div', { class: 'scorecard mini', role: 'group', 'aria-label': label + ' figures' },
       [['v-supported', 'Match', t.supported], ['v-contradicted', 'Mismatch', t.contradicted], ['v-insufficient_evidence', 'Cannot settle', t.insufficient], ['v-blocked', 'Stopped', t.blocked], ['review', 'Need review', t.review]]
-        .map(([cls, l, v]) => h('div', { class: 'sc-cell ' + cls }, h('span', { class: 'sc-label' }, l), h('span', { class: 'sc-value' }, String(v))))),
+        .map(([cls, l, v]) => h('div', { class: 'sc-cell ' + cls + (v ? '' : ' zero') }, h('span', { class: 'sc-label' }, l), h('span', { class: 'sc-value' }, String(v))))),
     h('ul', { class: 'car-claims' }, fs.map((f) => h('li', {},
       verdictBadge(f), h('p', { class: 'claim-text' }, f.claim_text), h('p', { class: 'muted' }, plainResult(f)),
       isBlocked(f) ? null : samplesPanel(f, { mask: pseudo, prefix: 'r' + i })))),
