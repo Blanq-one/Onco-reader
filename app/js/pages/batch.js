@@ -75,7 +75,7 @@ function drawAdder(slot, redraw) {
     state.live ? null : h('div', { class: 'notice info', role: 'status' }, 'Auditing needs the local server (python server/serve.py). It is not answering right now.'),
     h('div', { class: 'row' }, examples, h('label', { for: 'batch-file', class: 'muted' }, 'or choose files (.md, .txt, .pdf)'), file),
     h('label', { for: 'batch-paste', class: 'muted', style: 'display:block;margin-top:12px' }, 'Paste a report'), ta, h('div', { class: 'row', style: 'margin-top:8px' }, paste),
-    b.reports.length ? [h('h3', {}, 'Added'), list, h('p', { class: 'muted' }, 'File names are shown here only so you can tell your files apart. The slides use the labels above.')] : null,
+    b.reports.length ? [h('h3', { class: 'batch-added' }, 'Added'), list, h('p', { class: 'muted' }, 'File names are shown here only so you can tell your files apart. The slides use the labels above.')] : null,
     h('div', { class: 'row', style: 'margin-top:12px' }, run), status));
 }
 
@@ -111,13 +111,18 @@ function drawResults(slot, live, redraw) {
     slides.forEach((s, k) => { if (k === b.index) s.removeAttribute('inert'); else s.setAttribute('inert', ''); });
     [...dots.children].forEach((d, k) => d.setAttribute('aria-current', String(k === b.index)));
     prevBtn.disabled = n < 2; nextBtn.disabled = n < 2;
+    fit();
     if (speak) live.textContent = reportLabel(shown[b.index].i) + ', slide ' + (b.index + 1) + ' of ' + n;
   };
   const prevBtn = h('button', { class: 'btn', type: 'button', 'aria-label': 'Previous report', onclick: () => go(b.index - 1, true) }, '← Previous');
   const nextBtn = h('button', { class: 'btn', type: 'button', 'aria-label': 'Next report', onclick: () => go(b.index + 1, true) }, 'Next →');
   shown.forEach(({ i }, k) => dots.append(h('button', { class: 'dot', type: 'button', 'aria-label': 'Show ' + reportLabel(i), onclick: () => go(k, true) })));
+  // The viewport takes the height of the slide on show, so a short report does not leave a tall empty frame.
+  const viewport = h('div', { class: 'car-viewport' }, track);
+  const fit = () => { const s = slides[b.index]; if (s && s.offsetHeight) viewport.style.height = s.offsetHeight + 'px'; };
+  if (typeof ResizeObserver !== 'undefined') { const ro = new ResizeObserver(fit); slides.forEach((s) => ro.observe(s)); }
   const view = h('section', { class: 'carousel', 'aria-roledescription': 'carousel', 'aria-label': 'Results for each report', tabindex: '-1' },
-    h('div', { class: 'car-viewport' }, track),
+    viewport,
     h('div', { class: 'car-controls no-print' }, prevBtn, dots, nextBtn));
   view.addEventListener('keydown', (e) => {
     if (e.target.closest('textarea,input,select')) return;
@@ -128,7 +133,7 @@ function drawResults(slot, live, redraw) {
   view.addEventListener('pointerdown', (e) => { x0 = e.target.closest('button,.ids,a,input') ? null : e.clientX; });
   view.addEventListener('pointerup', (e) => { if (x0 != null && Math.abs(e.clientX - x0) > 50) go(b.index + (e.clientX < x0 ? 1 : -1), true); x0 = null; });
   if (reduceMotion()) track.classList.add('still');
-  slot.replaceChildren(h('h2', { id: 'car-h' }, 'Results'), view);
+  slot.replaceChildren(h('h2', { id: 'car-h', class: 'list-h' }, 'Results, one slide per report'), view);
   go(b.index, false);
 }
 
@@ -139,15 +144,14 @@ function slideBody(r, i) {
   const fs = r.doc.findings, t = tally(fs, isBlocked), pseudo = pseudonymizer();
   const seg = (n, cls, text) => n ? h('span', { class: 'seg ' + cls, style: 'flex-grow:' + n, title: n + ' ' + text }, n) : null;
   return [
-    h('h3', {}, label, h('span', { class: 'muted' }, '  ' + plural(t.total, 'claim'))),
+    h('div', { class: 'slide-head' }, h('h3', {}, label), h('span', { class: 'muted' }, plural(t.total, 'claim') + ' checked')),
     h('div', { class: 'vbar', role: 'img', 'aria-label': t.supported + ' supported, ' + t.contradicted + ' contradicted, ' + t.insufficient + ' insufficient evidence, ' + t.blocked + ' blocked' },
       seg(t.supported, 'v-supported', 'supported'), seg(t.contradicted, 'v-contradicted', 'contradicted'), seg(t.insufficient, 'v-insufficient_evidence', 'insufficient evidence'), seg(t.blocked, 'v-blocked', 'blocked')),
-    h('p', { class: 'row' },
-      h('span', { class: 'badge v-supported' }, '✓ ' + t.supported + ' supported'), h('span', { class: 'badge v-contradicted' }, '✕ ' + t.contradicted + ' contradicted'),
-      h('span', { class: 'badge v-insufficient_evidence' }, '? ' + t.insufficient + ' insufficient'), t.blocked ? h('span', { class: 'badge v-blocked' }, '⛔ ' + t.blocked + ' blocked') : null,
-      t.review ? h('span', { class: 'chip review' }, t.review + ' need review') : null),
+    h('div', { class: 'scorecard mini', role: 'group', 'aria-label': label + ' figures' },
+      [['v-supported', 'Match', t.supported], ['v-contradicted', 'Mismatch', t.contradicted], ['v-insufficient_evidence', 'Cannot settle', t.insufficient], ['v-blocked', 'Stopped', t.blocked], ['review', 'Need review', t.review]]
+        .map(([cls, l, v]) => h('div', { class: 'sc-cell ' + cls }, h('span', { class: 'sc-label' }, l), h('span', { class: 'sc-value' }, String(v))))),
     h('ul', { class: 'car-claims' }, fs.map((f) => h('li', {},
-      h('div', {}, verdictBadge(f)), h('p', { class: 'claim-text' }, f.claim_text), h('p', { class: 'muted' }, plainResult(f)),
+      verdictBadge(f), h('p', { class: 'claim-text' }, f.claim_text), h('p', { class: 'muted' }, plainResult(f)),
       isBlocked(f) ? null : samplesPanel(f, { mask: pseudo, prefix: 'r' + i })))),
     h('p', { class: 'muted' }, 'Data readiness only. No clinical claims. Sample names are made up for this view.'),
   ];

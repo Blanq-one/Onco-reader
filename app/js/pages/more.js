@@ -1,6 +1,6 @@
 import { h, fmtNum, fmtValue, pct, plural, store } from '../util.js';
-import { state, findings, byId, isBlocked, hasNumber, decisions, reviewStatus, FLAG_TEXT, VERDICT } from '../state.js';
-import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, shareText, valueText, isRatio, factLine, stackTable, plainResult, interpTag, forRoles, auditJsonText, sourceLine } from '../ui.js';
+import { state, findings, byId, isBlocked, hasNumber, decisions, reviewStatus, FLAG_TEXT, VERDICT, saveFilters } from '../state.js';
+import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, shareText, valueText, isRatio, factLine, stackTable, plainResult, interpTag, forRoles, auditJsonText, sourceLine, scorecard, issuesTable } from '../ui.js';
 import { decisionPanel } from '../decisionPanel.js';
 import { columnsOf, filesOf } from './claim.js';
 
@@ -102,21 +102,11 @@ export function summaryPage(q) {
   root.append(h('h1', {}, 'Summary'),
     sourceLine(),
     h('div', { class: 'row no-print', style: 'margin-bottom:16px' },
-      h('button', { class: 'btn', type: 'button', onclick: () => window.print() }, 'Print this page'), exportButtons('Download the audit')),
-    decisionPanel('summary'));
+      h('button', { class: 'btn', type: 'button', onclick: () => window.print() }, 'Print this page'), exportButtons('Download the audit')));
 
-  const groups = [
-    ['Supported', (x) => !isBlocked(x) && x.verdict === 'supported'],
-    ['Contradicted', (x) => x.verdict === 'contradicted'],
-    ['Insufficient evidence (not blocked)', (x) => x.verdict === 'insufficient_evidence' && !isBlocked(x)],
-    ['Blocked by a safety check', isBlocked],
-    ['Need review', (x) => x.needs_human_review],
-    ['Verdict overridden by a reviewer', (x) => reviewStatus(x) === 'overridden'],
-  ];
-  root.append(h('section', { class: 'card', 'aria-labelledby': 'cnt-h' }, h('h2', { id: 'cnt-h' }, 'Counts'),
-    h('p', {}, plural(all.length, 'claim') + ' in this report. Each count links to the claims behind it.'),
-    h('ul', { class: 'counts' }, groups.map(([label, test]) => { const list = all.filter(test);
-      return h('li', {}, h('b', {}, String(list.length)), ' ' + label + ': ', links(list)); }))));
+  // Same figures and issues as Results; a figure opens Results filtered to those claims.
+  const pick = (p) => { Object.assign(state.filters, { q: '', verdict: '', review: false, flag: '' }, p); saveFilters(); location.hash = '#/results'; };
+  root.append(scorecard(all, pick), decisionPanel('summary'), issuesTable(all));
 
   root.append(h('section', { class: 'card', 'aria-labelledby': 'rd-h' }, h('h2', { id: 'rd-h' }, 'Review decisions'),
     h('div', { class: 'table-wrap' }, stackTable(h('table', {}, h('thead', {}, h('tr', {}, ['Claim', 'Original verdict', 'Reviewer verdict', 'Status', 'Note'].map((t) => h('th', { scope: 'col' }, t)))),
