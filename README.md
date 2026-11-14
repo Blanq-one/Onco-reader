@@ -274,7 +274,7 @@ src/export/      audit.json exporter (organizers' shared format v0.2) and review
 contract/        the findings shape (README.md), its validator, demo and mock reports
 scripts/         make_audit.py, fresh_clone_check.py, run_checks.py and other checks
 tests/           unit tests and the guardrail edge-case bank (tests/edge_cases.csv)
-out/             generated findings, plus the files the app's demo mode loads
+out/             generated findings, plus the files the app's example report loads
 docs/            briefs and task prompts
 ```
 

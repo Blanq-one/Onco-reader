@@ -1,6 +1,6 @@
 import { h, fmtNum, fmtValue, pct, plural, store } from '../util.js';
 import { state, findings, byId, isBlocked, hasNumber, decisions, reviewStatus, FLAG_TEXT, VERDICT } from '../state.js';
-import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, shareText, valueText, isRatio, factLine, stackTable, plainResult, interpTag, forRoles, auditJsonText } from '../ui.js';
+import { verdictBadge, flagChips, reviewBlock, claimFacts, exportButtons, breadcrumbs, headlineText, shareText, valueText, isRatio, factLine, stackTable, plainResult, interpTag, forRoles, auditJsonText, sourceLine } from '../ui.js';
 import { decisionPanel } from '../decisionPanel.js';
 import { columnsOf, filesOf } from './claim.js';
 
@@ -100,7 +100,7 @@ export function summaryPage(q) {
   const link = (f, text) => h('a', { class: text ? null : 'cid', href: '#/claim/' + enc(f.id) + '?from=summary' }, text || f.id);
   const links = (list) => list.length ? list.map((f, i) => [i ? ', ' : '', link(f)]) : h('span', { class: 'muted' }, 'none');
   root.append(h('h1', {}, 'Summary'),
-    h('p', { class: 'muted' }, (d.report_title || 'Report') + ' | ' + ((d.data_release && d.data_release.name) || 'unknown release') + ' | source ' + state.source + (d.is_mock ? ' | SAMPLE DATA' : '')),
+    sourceLine(),
     h('div', { class: 'row no-print', style: 'margin-bottom:16px' },
       h('button', { class: 'btn', type: 'button', onclick: () => window.print() }, 'Print this page'), exportButtons('Download the audit')),
     decisionPanel('summary'));

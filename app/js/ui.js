@@ -1,12 +1,142 @@
 import { h, sv, pct, fmtNum, fmtValue, plural, toast } from './util.js';
 import { VERDICT, FLAG_TEXT, isBlocked, cannotAnswer, hasNumber, decisions, decide, decisionAllowed, BLOCKED_OVERRIDE_ERROR, reviewStatus, reviewJson, state, dataUrl, minGroup, minEvents, effectiveVerdict } from './state.js';
-import { nextStepExport } from './decision.js';
+import { nextStepExport, analyse, STEPS } from './decision.js';
 
 // Role views (see ROLES in state.js): an element tagged data-for="researcher engineer" shows only in those role
 // views and in "All details"; untagged elements show for everyone. The CSS in app.css does the hiding.
 export const forRoles = (...roles) => roles.join(' ');
 // Recommendations are marked as interpretation, never as findings.
 export const interpTag = () => h('span', { class: 'interp', title: 'A suggestion drawn from the findings, not a finding itself' }, 'Interpretation');
+
+// What backs a finding, worked out from the findings file itself. A missing piece shows as a warning, never as a tick.
+export const checksumOk = () => { const r = (state.data && state.data.data_release) || {}; return r.checksum_verified === true || r.checksum_status === 'verified'; };
+export const isTraced = (f) => hasNumber(f) && !!f.evidence.calculation && (f.evidence.source_files || []).length > 0;
+export function assuranceItems(all) {
+  const rel = (state.data && state.data.data_release) || {};
+  const numeric = all.filter(hasNumber), traced = numeric.filter(isTraced);
+  const lim = all.filter((f) => f.limitation), blocked = all.filter(isBlocked);
+  return [
+    [checksumOk(), 'Frozen data', (rel.name || 'The data release') + ': checksum status ' + (rel.checksum_status || (checksumOk() ? 'verified' : 'unknown')) + (checksumOk() ? '.' : ', so treat results with care.')],
+    [traced.length === numeric.length, 'Every number traced', traced.length + ' of ' + numeric.length + ' numbers show their calculation and source files.'],
+    [lim.length === all.length, 'Limits always shown', lim.length + ' of ' + plural(all.length, 'claim') + ' carry a limitation.'],
+    [true, 'Safety checks on', (blocked.length ? plural(blocked.length, 'request') + ' stopped before any analysis (clinical, individual or personal). ' : 'Clinical, individual and personal requests are stopped before any analysis. ') + 'Data readiness only.'],
+    [true, 'A person decides', 'Your decisions are saved in review.json and never change audit.json.'],
+  ];
+}
+// One row of trust badges; the full sentences open underneath on demand.
+export function trustRow(all) {
+  const items = assuranceItems(all);
+  return h('details', { class: 'trust' + (items.some((i) => !i[0]) ? ' has-warn' : '') },
+    h('summary', {}, h('span', { class: 'trust-chips' }, items.map(([ok, head, text]) =>
+      h('span', { class: 'trust-chip ' + (ok ? 'ok' : 'warn'), title: text }, h('span', { 'aria-hidden': 'true' }, ok ? '✓ ' : '⚠ '), head))),
+      h('span', { class: 'trust-more' }, 'How we checked')),
+    h('ul', {}, items.map(([ok, head, text]) => h('li', { class: ok ? 'ok' : 'warn' }, h('b', {}, head + '. '), text))));
+}
+
+// The hero: one answer for the whole report, and the verdict mix as one bar. Legend entries filter the list.
+export function heroVerdict(all, onPick) {
+  const a = analyse(), s = STEPS[a.step], g = a.groups;
+  const segs = [['supported', 'Supported', '✓'], ['contradicted', 'Contradicted', '✕'], ['insufficient_evidence', 'Cannot settle', '?']]
+    .map(([v, label, ic]) => ({ v, label, ic, n: all.filter((f) => f.verdict === v).length }));
+  const parts = [];
+  if (g.supported.length) parts.push(g.supported.length + (g.supported.length === 1 ? ' matches' : ' match') + ' the data');
+  if (g.contradicted.length) parts.push(g.contradicted.length + (g.contradicted.length === 1 ? ' does not' : ' do not'));
+  const unsettled = g.insufficient.length + g.cannot.length;
+  if (unsettled) parts.push(unsettled + ' cannot be settled');
+  if (g.blocked.length) parts.push(g.blocked.length + (g.blocked.length === 1 ? ' was' : ' were') + ' stopped by a safety check');
+  const list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0] || 'none could be checked';
+  const review = all.filter((f) => f.needs_human_review).length;
+  return h('section', { class: 'hero-v step-' + a.step, 'aria-labelledby': 'hv-h' },
+    h('div', { class: 'hv-main' },
+      h('div', { class: 'dp-kicker' }, h('span', {}, 'Verdict on this report'), interpTag()),
+      h('h2', { id: 'hv-h', class: 'hv-step' }, h('span', { class: 'dp-ic', 'aria-hidden': 'true' }, s.icon), s.label),
+      h('p', { class: 'hv-line' }, 'Of ' + plural(all.length, 'claim') + ', ' + list + '.'),
+      h('p', { class: 'muted hv-why' }, s.text)),
+    h('div', { class: 'hv-mix' },
+      h('div', { class: 'hv-bar', role: 'img', 'aria-label': segs.map((x) => x.n + ' ' + x.label).join(', ') },
+        segs.filter((x) => x.n).map((x) => h('i', { class: 'seg v-' + x.v, style: 'flex:' + x.n }))),
+      h('div', { class: 'hv-legend' }, segs.map((x) => h('button', { type: 'button', class: 'hv-key v-' + x.v, onclick: () => onPick && onPick({ verdict: x.v }) },
+        h('b', {}, String(x.n)), h('span', {}, x.ic + ' ' + x.label))),
+        h('button', { type: 'button', class: 'hv-key review', onclick: () => onPick && onPick({ review: true }) }, h('b', {}, String(review)), h('span', {}, 'Need review')))));
+}
+
+export function checksumBadge(d) {
+  const r = (d && d.data_release) || {};
+  const ok = r.checksum_verified === true || r.checksum_status === 'verified';
+  return h('span', { class: 'badge ' + (ok ? 'v-supported' : 'v-insufficient_evidence') },
+    h('span', { class: 'ic', 'aria-hidden': 'true' }, ok ? '✓' : '!'), ok ? 'Checksum verified' : 'Checksum not verified');
+}
+
+// Where the results on screen come from. A live audit only when the server audited the report in this session;
+// anything loaded from a file (the example report, ?data=) is labelled as precomputed.
+export function sourceLine() {
+  const d = state.data || {}, r = d.data_release || {};
+  const status = r.checksum_status || (r.checksum_verified === true ? 'verified' : 'unknown');
+  const rel = r.name || 'TCGA-BRCA frozen release';
+  const live = state.mode === 'live';
+  const title = d.report_title || (live ? state.reportTitle : '') || (live ? 'your pasted text' : 'untitled');
+  return h('p', { class: 'source-line', id: 'source-line', 'data-source': live ? 'live' : 'example' },
+    live ? null : h('span', { class: 'chip ex-chip' }, 'Example'), ' ',
+    (live ? 'Live audit of: ' : 'Example report: ') + title + ' · ' + rel + ' · checksums ' + status);
+}
+
+// Review progress for the whole report. Required reviews are the flagged claims; with none flagged, every claim counts.
+export function reviewProgress() {
+  const all = (state.data && state.data.findings) || [];
+  const req = all.filter((f) => f.needs_human_review);
+  const pool = req.length ? req : all;
+  const done = pool.filter((f) => reviewStatus(f) !== 'pending').length;
+  return { done, total: pool.length, required: req.length, verified: pool.length > 0 && done === pool.length };
+}
+export function verificationBar() {
+  const p = reviewProgress();
+  const pill = p.verified ? h('span', { class: 'status-pill ok' }, '✓ Reviews recorded') : h('span', { class: 'status-pill auto' }, '⚙ Automated check');
+  return h('div', { class: 'verify-in' }, pill,
+    h('span', { class: 'vb-text' }, p.done + ' of ' + p.total + (p.required ? ' required reviews' : ' claims reviewed') + (p.required ? ' done' : '')),
+    h('div', { class: 'progress vb-prog', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(p.total), 'aria-valuenow': String(p.done), 'aria-label': 'Review progress' },
+      h('i', { style: 'width:' + (p.total ? 100 * p.done / p.total : 0) + '%' })),
+    p.verified ? h('a', { class: 'btn', href: '#/summary' }, 'Open the Summary') : h('a', { class: 'btn primary', href: '#/review' }, 'Open the review queue'));
+}
+// Per-claim review state, next to the verdict.
+export function statusPill(f) {
+  const st = reviewStatus(f);
+  const t = { pending: ['auto', '⚙ Automated check'], accepted: ['ok', '✓ Accepted by reviewer'], overridden: ['bad', '⚑ Overridden by reviewer'], more_evidence_requested: ['warn', '? More evidence requested'] }[st];
+  return h('span', { class: 'status-pill ' + t[0] }, t[1]);
+}
+
+// Red-flag cards: one per category, only when it has claims. Each links to the claims behind it.
+export function redFlags(all) {
+  const link = (f, extra) => h('li', {}, h('a', { href: '#/claim/' + encodeURIComponent(f.id) }, f.id), ' ', h('span', {}, short(f.claim_text)), extra ? h('span', { class: 'rf-extra' }, ' ' + extra) : null);
+  const cats = [
+    ['bad', '✕', 'Numbers that do not match the data', all.filter((f) => f.verdict === 'contradicted'), (f) => f.correct_value && f.correct_value.text ? 'Data: ' + f.correct_value.text : ''],
+    ['warn', '⚠', 'Too few events for a stable comparison', all.filter((f) => f.guardrail_flags.includes('low_event_count'))],
+    ['warn', '⇄', 'Verdict changes under another rule', all.filter((f) => f.robustness && f.robustness.verdict_changes)],
+    ['block', '⛔', 'Requests stopped before analysis', all.filter(isBlocked), (f) => '(' + f.guardrail_flags.filter((x) => FLAG_TEXT[x]).map((x) => FLAG_TEXT[x]).join(', ') + ')'],
+  ].filter((c) => c[3].length);
+  const cards = cats.map(([cls, ic, title, list, extra]) => h('div', { class: 'flag-card ' + cls },
+    h('h3', {}, h('span', { 'aria-hidden': 'true' }, ic + ' '), title, h('span', { class: 'rf-n' }, String(list.length))),
+    h('ul', {}, list.slice(0, 4).map((f) => link(f, extra && extra(f)))),
+    list.length > 4 ? h('p', { class: 'muted' }, 'and ' + (list.length - 4) + ' more') : null));
+  if (!checksumOk()) cards.unshift(h('div', { class: 'flag-card warn' }, h('h3', {}, h('span', { 'aria-hidden': 'true' }, '⚠ '), 'Data files not confirmed'),
+    h('p', {}, 'The data files were not checked against their checksums. Treat every number with care.')));
+  if (!cards.length) return h('section', { class: 'flags-none', role: 'status' }, 'No claims fall in a red-flag category.');
+  return h('section', { class: 'flags', 'aria-labelledby': 'rf-h' }, h('h2', { id: 'rf-h' }, 'Red flags'), h('div', { class: 'flag-grid' }, cards));
+}
+const short = (t) => { t = String(t || ''); return t.length > 90 ? t.slice(0, 87).replace(/\s+\S*$/, '') + '...' : t; };
+
+// Lab-style reference line: the value that matters next to its threshold.
+export function referenceLine(f) {
+  const b = (f.evidence && f.evidence.breakdown) || [];
+  if (!b.length || isBlocked(f)) return null;
+  const items = [];
+  const ns = b.filter((r) => r.n != null);
+  if (ns.length) { const s = ns.reduce((m, r) => (r.n < m.n ? r : m)); items.push([s.n >= minGroup(), 'Smallest group ' + fmtNum(s.n) + ' (' + s.group + '), minimum ' + fmtNum(minGroup())]); }
+  const es = b.filter((r) => r.events != null);
+  if (es.length) { const s = es.reduce((m, r) => (r.events < m.events ? r : m)); items.push([s.events >= minEvents(), 'Fewest deaths ' + fmtNum(s.events) + ' (' + s.group + '), minimum ' + fmtNum(minEvents())]); }
+  if (!items.length) return null;
+  return h('ul', { class: 'ref-line', 'aria-label': 'Reference thresholds' }, items.map(([ok, t]) =>
+    h('li', { class: ok ? 'ok' : 'warn' }, h('span', { 'aria-hidden': 'true' }, ok ? '✓ ' : '⚠ '), t, ok ? '' : ' (low)')));
+}
 
 export function verdictBadge(f) {
   if (isBlocked(f)) return h('span', { class: 'badge v-blocked' }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '⛔'), 'Blocked');
@@ -198,12 +328,12 @@ export function factLine(f) {
   return null;
 }
 
-// audit.json (server, or the precomputed demo file) and review.json (built here)
+// audit.json (server, or the precomputed example file) and review.json (built here)
 export function saveBlob(text, name) {
   const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
   const a = h('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-// audit.json in the shared format: the server makes it for a live report; demo mode uses the precomputed file.
+// audit.json in the shared format: the server makes it for a live report; the example report uses the precomputed file.
 // Kept per report, so the download and the data engineer's checksum table share one request.
 let auditCache = { key: null, text: null };
 export async function auditJsonText() {

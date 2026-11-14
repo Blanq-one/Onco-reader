@@ -1,6 +1,6 @@
 import { h } from '../util.js';
 import { state, findings, saveFilters, FLAG_TEXT, isBlocked, hasNumber } from '../state.js';
-import { verdictBadge, flagChips, headlineText, shareText, factLine, plainResult, exportButtons, forRoles } from '../ui.js';
+import { verdictBadge, trustRow, heroVerdict, sourceLine, redFlags, flagChips, headlineText, shareText, factLine, plainResult, exportButtons, forRoles } from '../ui.js';
 import { decisionPanel } from '../decisionPanel.js';
 import { filesOf } from './claim.js';
 import { pct, plural } from '../util.js';
@@ -32,13 +32,9 @@ export function resultsPage() {
       h('p', { class: 'muted' }, 'The findings file loaded but holds no claims.'), h('a', { class: 'btn primary', href: '#/' }, 'Back to Start')));
     return root;
   }
-  root.append(decisionPanel('results'));
-  const n = (v) => all.filter((x) => x.verdict === v).length;
-  const stat = (cls, num, label) => h('div', { class: 'stat ' + cls }, h('b', {}, String(num)), h('span', {}, label));
-  root.append(h('div', { class: 'strip', role: 'group', 'aria-label': 'Summary' },
-    stat('v-supported', n('supported'), '✓ Supported'), stat('v-contradicted', n('contradicted'), '✕ Contradicted'),
-    stat('v-insufficient_evidence', n('insufficient_evidence'), '? Insufficient evidence'),
-    stat('', all.filter((x) => x.needs_human_review).length, 'Needs review')));
+  const pick = (p) => { Object.assign(state.filters, { verdict: '', review: false }, p); saveFilters(); window.dispatchEvent(new Event('hashchange'));
+    setTimeout(() => { const l = document.getElementById('claim-list'); l && l.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50); };
+  root.append(sourceLine(), heroVerdict(all, pick), trustRow(all), redFlags(all));
 
   const flags = [...new Set(all.flatMap((x) => x.guardrail_flags))];
   const f = state.filters;
@@ -48,6 +44,7 @@ export function resultsPage() {
   const sel = (id, label, opts, key) => h('label', {}, label, h('select', { id, onchange: (e) => { f[key] = e.target.value; saveFilters(); draw(); } },
     opts.map(([v, t]) => h('option', Object.assign({ value: v }, f[key] === v ? { selected: true } : {}), t))));
   const search = h('input', { type: 'search', id: 'search', value: f.q, placeholder: 'Search claims', 'aria-label': 'Search claims', oninput: (e) => { f.q = e.target.value; saveFilters(); draw(); } });
+  root.append(h('h2', { class: 'list-h' }, 'Every claim'));
   root.append(h('div', { class: 'filters', role: 'search' },
     h('label', {}, 'Search', search),
     sel('f-verdict', 'Verdict', [['', 'All'], ['supported', 'Supported'], ['contradicted', 'Contradicted'], ['insufficient_evidence', 'Insufficient evidence']], 'verdict'),
@@ -56,6 +53,8 @@ export function resultsPage() {
     sel('f-sort', 'Sort', [['order', 'Report order'], ['verdict', 'Verdict, problems first'], ['review', 'Needs review first'], ['text', 'Claim text A to Z']], 'sort'),
     h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(f, { q: '', verdict: '', review: false, flag: '', sort: 'order' }); saveFilters(); window.dispatchEvent(new Event('hashchange')); } }, 'Clear')));
   root.append(count, list, bar);
+  const dp = decisionPanel('results');
+  root.append(h('details', { class: 'dp-wrap' }, h('summary', {}, 'Record the team decision'), dp));
 
   function drawBar() {
     const s = state.selected;

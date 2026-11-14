@@ -1,7 +1,7 @@
 import { h, countUp, copyText, toast, fmtNum, fmtValue, pct, plural } from '../util.js';
 import { state, findings, isBlocked, cannotAnswer, hasNumber, VERDICT, FLAG_TEXT } from '../state.js';
 import { samplesPanel } from '../samples.js';
-import { verdictBadge, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText, isSurvivalGroups, deathsText } from '../ui.js';
+import { verdictBadge, statusPill, referenceLine, isTraced, checksumOk, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText, isSurvivalGroups, deathsText } from '../ui.js';
 
 const enc = encodeURIComponent;
 
@@ -20,7 +20,11 @@ export function claimPage(f, q) {
   const arrow = (t, label, x) => x ? h('a', { class: 'btn', href: '#/claim/' + enc(x.id) + keep, 'aria-label': label + ': ' + x.claim_text }, t) : h('span', { class: 'btn', 'aria-disabled': 'true', style: 'opacity:.4' }, t);
   root.append(h('div', { class: 'pager no-print' }, arrow('← Previous', 'Previous claim', prev), h('span', { class: 'muted' }, 'Claim ' + (i + 1) + ' of ' + all.length), arrow('Next →', 'Next claim', next)));
   root.append(h('h1', {}, f.claim_text));
-  root.append(h('p', { class: 'plain' }, verdictBadge(f), ' ', h('span', {}, plainResult(f))));
+  root.append(h('p', { class: 'plain' }, verdictBadge(f), ' ', statusPill(f), ' ', h('span', {}, plainResult(f))));
+  const trace = isBlocked(f) ? ['⛔', 'Stopped before any analysis. No number was computed.']
+    : isTraced(f) ? ['✓', 'Computed from ' + plural(f.evidence.source_files.length, 'source file') + ', checksums ' + (((state.data || {}).data_release || {}).checksum_status || (checksumOk() ? 'verified' : 'unknown')) + '. Limitation shown below.']
+    : ['⚠', 'No calculation to show for this claim. Limitation shown below.'];
+  root.append(h('p', { class: 'trace-line' + (trace[0] === '⚠' ? ' warn' : '') }, h('span', { 'aria-hidden': 'true' }, trace[0] + ' '), trace[1]));
   root.append(...claimFacts(f));
 
   // verdict / blocked / cannot answer
@@ -46,6 +50,7 @@ export function claimPage(f, q) {
           isRatio(f) ? [h('span', { class: 'of' }, 'to 1'), h('span', { class: 'p' }, groupsText(f))]
             : [h('span', { class: 'of' }, 'of ' + fmtNum(e.denominator)), h('span', { class: 'p' }, pct(e.n_samples, e.denominator))]),
       h('p', { class: 'caption', style: 'margin:4px 0 8px', 'data-for': forRoles('researcher', 'engineer') }, caption(f)),
+      referenceLine(f),
       h('div', { class: 'muted', 'data-for': forRoles('engineer') }, 'Metric: ', h('span', { class: 'mono' }, e.metric_name || 'unknown'), ' | value ' + valueText(f))));
     if (lowEvents) root.append(h('div', { class: 'notice', role: 'alert', 'data-for': forRoles('datause', 'researcher') }, h('b', {}, '⚠ Low event count. '), 'Too few deaths for a stable comparison. This finding is flagged for review.'));
   }

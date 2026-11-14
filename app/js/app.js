@@ -1,4 +1,5 @@
 import { h, store, toast, reduceMotion } from './util.js';
+import { verificationBar } from './ui.js';
 import { state, dataParam, loadData, byId, findings, ROLES, getRole, setRole } from './state.js';
 import { startPage, aboutPage, notFoundPage } from './pages/start.js';
 import { resultsPage, resultsShortcut } from './pages/results.js';
@@ -78,12 +79,24 @@ function banner() {
   const slot = document.getElementById('banner-slot');
   const d = state.data;
   slot.replaceChildren(d && d.is_mock ? h('div', { class: 'banner', role: 'alert' },
-    'SAMPLE DATA. ' + (d.mock_warning || 'These numbers are invented and are not TCGA-BRCA results.')) : '');
+    'Synthetic sample data. These numbers are not real results.') : '');
 }
+// The sticky human-in-the-loop bar: shown on the report views once findings are loaded.
+const BAR_ON = ['/results', '/claim', '/review', '/summary', '/compare'];
+function verifyBar() {
+  const slot = document.getElementById('verify-slot');
+  const on = state.data && BAR_ON.includes(current.path);
+  slot.hidden = !on;
+  slot.replaceChildren(on ? verificationBar() : '');
+  const top = document.getElementById('topbar');
+  document.documentElement.style.setProperty('--tb-h', (getComputedStyle(top).position === 'sticky' ? top.offsetHeight : 0) + 'px');
+}
+window.addEventListener('en:decided', verifyBar);
+window.addEventListener('resize', verifyBar);
 function foot() {
   // A pasted report that is extracted but not yet audited is not the loaded findings: say which is which.
   const src = state.mode === 'live-extract' ? 'Report: ' + (state.reportTitle || 'your pasted text') + ' (extracted, not audited yet)'
-    : state.data ? 'Source: ' + state.source : '';
+    : state.data && state.data.data_release ? 'Data release: ' + state.data.data_release.name : '';
   document.getElementById('foot').textContent = (src ? src + '. ' : '') + 'Checks data readiness only. No clinical claims.';
 }
 
@@ -110,7 +123,7 @@ function route() {
   else view = notFoundPage();
 
   current = { path: r.path.startsWith('/claim/') ? '/claim' : r.path, id: m && m[1] };
-  banner(); foot();
+  banner(); foot(); verifyBar();
   document.querySelectorAll('[data-nav]').forEach((a) => {
     const on = a.dataset.nav === '#' + (current.path === '/claim' ? '/results' : current.path);
     on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');

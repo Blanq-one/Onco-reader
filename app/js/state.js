@@ -108,6 +108,7 @@ export function decide(id, patch) {
   if (!decisionAllowed(byId(id), next)) return false;
   all[id] = next;
   store('en.decisions', all);
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('en:decided'));
   return true;
 }
 export const DECISION_TEXT = { approve: 'Accepted', reject: 'Overridden', more: 'More evidence requested' };

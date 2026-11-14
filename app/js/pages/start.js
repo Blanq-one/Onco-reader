@@ -1,7 +1,8 @@
 import { h, store, fmtNum, plural, toast } from '../util.js';
-import { state, loadData, findings, dataParam, DEMO_FILE } from '../state.js';
+import { state, loadData, findings, DEMO_FILE } from '../state.js';
 import { checkHealth, extractReport, pdfText } from '../live.js';
-import { stackTable } from '../ui.js';
+import { stackTable, checksumBadge } from '../ui.js';
+export { checksumBadge };
 
 const rerender = () => window.dispatchEvent(new Event('hashchange'));
 const MAX_CHARS = 100000;
@@ -13,11 +14,6 @@ function enter(dest) {
   if (location.hash === '#' + (to || '')) rerender();
 }
 
-export function checksumBadge(d) {
-  const ok = d.data_release && (d.data_release.checksum_verified === true || d.data_release.checksum_status === 'verified');
-  return h('span', { class: 'badge ' + (ok ? 'v-supported' : 'v-insufficient_evidence') },
-    h('span', { class: 'ic', 'aria-hidden': 'true' }, ok ? '✓' : '!'), ok ? 'Checksum verified' : 'Checksum not verified');
-}
 
 export function startPage() {
   const d = state.data;
@@ -31,27 +27,33 @@ export function startPage() {
   const liveSlot = h('div', { id: 'live-slot' });
   root.append(liveSlot);
 
-  const demoMsg = h('div', { role: 'status', 'aria-live': 'polite' });
-  const demoBtn = h('button', { class: 'btn big', type: 'button', id: 'demo-btn' }, 'Demo mode');
-  demoBtn.onclick = async () => {
-    demoBtn.disabled = true; demoMsg.replaceChildren(h('span', { class: 'muted' }, 'Loading the precomputed audit...'));
+  // The example report: a precomputed audit of the practice brief. It is the main action only when no local server answers.
+  const exMsg = h('div', { role: 'status', 'aria-live': 'polite' });
+  const exBtn = h('button', { class: 'btn', type: 'button', id: 'example-btn' }, 'Open the example report');
+  exBtn.onclick = async () => {
+    exBtn.disabled = true; exMsg.replaceChildren(h('span', { class: 'muted' }, 'Opening the example report...'));
     const ok = await loadData(DEMO_FILE);
-    if (ok) { state.mode = 'demo'; enter('#/extract'); } else { demoMsg.replaceChildren(h('div', { class: 'notice err', role: 'alert' }, state.error || 'The demo file could not be loaded.')); demoBtn.disabled = false; }
+    if (ok) { state.mode = 'example'; enter('#/extract'); } else { exMsg.replaceChildren(h('div', { class: 'notice err', role: 'alert' }, state.error || 'The example report could not be opened.')); exBtn.disabled = false; }
   };
-  const demo = h('section', { class: 'card', 'aria-labelledby': 'demo-h' }, h('h2', { id: 'demo-h' }, 'Demo mode'),
-    h('p', { class: 'muted' }, 'Works without a server. Shows the precomputed audit of the practice report from ' + DEMO_FILE.replace('out/', 'out/') + '.'),
-    h('div', { class: 'row' }, demoBtn,
-      d ? h('a', { class: 'btn', href: '#/results' }, 'Open the loaded results (' + plural(findings().length, 'claim') + ')') : null,
-      h('a', { class: 'btn', href: '#/about' }, 'How this works and what it will not do')), demoMsg);
-  if (d) demo.append(h('div', { class: 'checks' }, h('span', { class: 'chip' }, 'Release: ' + ((d.data_release && d.data_release.name) || 'unknown')), checksumBadge(d),
-    h('span', { class: 'chip' }, 'Report: ' + (d.report_title || 'untitled')), dataParam() ? h('span', { class: 'chip' }, 'Loaded from ?data=' + dataParam()) : null));
-  root.append(demo);
-  root.afterMount = () => liveBox(liveSlot);
+  const help = h('p', { class: 'muted quiet-help', hidden: true }, 'Live auditing starts when the local server is running: python server\\serve.py');
+  const exHead = h('h2', { id: 'ex-h' }, 'Example report');
+  const ex = h('section', { class: 'card example', 'aria-labelledby': 'ex-h' }, exHead,
+    h('p', { class: 'muted' }, 'A finished audit of a sample research brief, computed earlier from the same data release.'),
+    h('div', { class: 'row' }, exBtn,
+      d ? h('a', { class: 'btn', href: '#/results' }, 'Back to the open results (' + plural(findings().length, 'claim') + ')') : null,
+      h('a', { href: '#/about' }, 'How this works and what it will not do')), help, exMsg);
+  root.append(ex);
+  root.afterMount = async () => {
+    const live = await liveBox(liveSlot);
+    if (!ex.isConnected) return;
+    if (live) { ex.classList.add('secondary'); exHead.textContent = 'Or open the example report'; }
+    else help.hidden = false;
+  };
   return root;
 }
 
 async function liveBox(slot) {
-  if (!(await checkHealth()) || !slot.isConnected) return;
+  if (!(await checkHealth()) || !slot.isConnected) return false;
   const status = h('div', { role: 'status', 'aria-live': 'polite' });
   const ta = h('textarea', { id: 'report-text', rows: 10, placeholder: 'Paste the report text here.' });
   ta.value = state.reportText || '';
@@ -69,13 +71,13 @@ async function liveBox(slot) {
       ta.value = await f.text(); state.reportTitle = f.name; say('', '');
     } else { say('err', 'Use a .md, .txt or .pdf file, or paste the text.'); }
   });
-  const practice = h('button', { class: 'btn', type: 'button', id: 'practice-btn' }, 'Use the practice report');
+  const practice = h('button', { class: 'btn', type: 'button', id: 'practice-btn' }, 'Use the example report text');
   practice.onclick = async () => {
     try {
       const r = await fetch(new URL('../../samples/practice_brief.md', import.meta.url).href);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       ta.value = await r.text(); state.reportTitle = 'practice_brief.md'; say('', ''); ta.focus();
-    } catch (e) { say('err', 'The practice report could not be loaded.'); }
+    } catch (e) { say('err', 'The example report text could not be loaded.'); }
   };
   const go = h('button', { class: 'btn primary', type: 'button', id: 'extract-btn' }, 'Extract claims');
   const cancel = h('button', { class: 'btn', type: 'button', hidden: true }, 'Cancel');
@@ -91,11 +93,12 @@ async function liveBox(slot) {
       state.mode = 'live-extract'; location.hash = '#/extract'; rerender();
     } catch (e) { say('err', e.name === 'AbortError' ? 'Cancelled.' : e.message); } finally { go.disabled = false; cancel.hidden = true; }
   };
-  slot.replaceChildren(h('section', { class: 'card', 'aria-labelledby': 'live-h' }, h('h2', { id: 'live-h' }, 'Audit your own report'),
+  slot.replaceChildren(h('section', { class: 'card', 'aria-labelledby': 'live-h' }, h('h2', { id: 'live-h' }, 'Audit a report'),
     h('p', { class: 'muted' }, 'Runs on this computer against the local data. Clinical or individual-patient requests are blocked.'),
     h('div', { class: 'row' }, practice, h('label', { for: 'report-file', class: 'muted' }, 'or upload a file (.md, .txt, .pdf)'), file),
     h('label', { for: 'report-text', class: 'muted', style: 'display:block;margin-top:12px' }, 'Report text'), ta,
     h('div', { class: 'row', style: 'margin-top:8px' }, go, cancel), status));
+  return true;
 }
 
 export function aboutPage() {
