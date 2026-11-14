@@ -100,6 +100,11 @@ details.card > summary { cursor: pointer; font-weight: 600; font-size: var(--fs-
 .notice { border-left: 3px solid var(--insufficient); padding: 0 var(--s2); margin: 0 0 var(--s2); }
 .notice.err { border-color: var(--contradicted); } .notice.block { border-color: var(--stopped); } .notice.info { border-color: var(--accent); }
 
+/* the theme control is an icon button: the same height, border and radius as the other buttons */
+.dw-ico { display: inline-flex; align-items: center; justify-content: center; width: var(--ctl); height: var(--ctl); padding: 0; border: 1px solid var(--border); border-radius: var(--r); background: var(--bg); color: var(--text); cursor: pointer; }
+.dw-ico:hover { border-color: var(--accent); }
+.dw-ico .i { width: 20px; height: 20px; }
+
 /* forms */
 .filters { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); align-items: end; margin: 0 0 var(--s2); }
 .filters label, .cmp-pick { display: flex; flex-direction: column; font-size: var(--fs-small); color: var(--muted); gap: 4px; }

@@ -28,14 +28,13 @@ function buildShell() {
     h('div', { class: 'top-menu', id: 'top-menu' },
       h('nav', { 'aria-label': 'Main' }, NAV.map(([href, label]) => h('a', { href, 'data-nav': href }, label))),
       roleSwitcher(),
-      h('button', { class: 'btn', type: 'button', id: 'theme', onclick: toggleTheme }, ''),
-      h('button', { class: 'btn', type: 'button', 'aria-label': 'Keyboard shortcuts', onclick: openHelp }, '?', h('span', { class: 'phone-only', 'aria-hidden': 'true' }, ' Keyboard shortcuts'))));
+      h('button', { class: 'dw-ico theme-ico', type: 'button', id: 'theme', onclick: toggleTheme }, '')));
   setThemeLabel();
   document.body.append(helpDialog());
 }
 // Same findings, different detail: see ROLES in state.js. The choice is remembered in this browser.
 function roleSwitcher() {
-  const sel = h('select', { id: 'role-select', 'aria-describedby': 'role-help' },
+  const sel = h('select', { id: 'role-select', 'aria-describedby': 'role-help', title: 'View as' },
     Object.entries(ROLES).map(([k, r]) => h('option', Object.assign({ value: k }, k === getRole() ? { selected: true } : {}), r.label)));
   sel.addEventListener('change', () => {
     const r = setRole(sel.value);
@@ -58,7 +57,13 @@ function setMenu(open, refocus) {
 function setThemeLabel() {
   const light = document.documentElement.dataset.theme === 'light';
   const b = document.getElementById('theme');
-  if (b) { b.textContent = light ? 'Dark theme' : 'Light theme'; }
+  if (!b) return;
+  // An icon button like the other controls: a moon offers dark, a sun offers light.
+  const label = light ? 'Switch to dark theme' : 'Switch to light theme';
+  b.setAttribute('aria-label', label); b.title = label;
+  b.innerHTML = light
+    ? '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>'
+    : '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>';
 }
 function toggleTheme() {
   const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
@@ -120,7 +125,11 @@ function route() {
   document.getElementById('crumbs-slot').replaceChildren(crumbs || '');
   const main = document.getElementById('main');
   if (!reduceMotion()) view.classList.add('page-enter');
+  // Soft choreography: the page's blocks rise in one after another as they come into view.
+  // The limitation is never held back, even for a moment.
+  [...view.children].forEach((c) => { if (!c.classList.contains('limit')) c.setAttribute('data-reveal', ''); });
   main.replaceChildren(view);
+  if (window.DW && DW.motion) DW.motion.reveal(view);
   document.title = (view.dataset.title ? view.dataset.title + ' | ' : '') + 'Evidence Navigator';
   window.scrollTo(0, current.path === '/results' && prev !== '/results' ? state.scroll : 0);
   main.focus({ preventScroll: true });
@@ -144,9 +153,16 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'c' && p !== '/compare') go('#/compare');
 });
 
+// Soft page and block transitions only: no sound, no decorative effects.
+function initFx() {
+  if (!window.DW || !DW.motion) return;
+  try { DW.motion.init(); DW.motion.setFx(false); } catch (e) { /* never essential */ }
+}
+
 (async function init() {
   setRole(getRole());
   buildShell();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initFx); else initFx();
   if (dataParam()) await loadData();
   if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#/');
   route();

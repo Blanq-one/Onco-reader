@@ -195,7 +195,7 @@ function showIn(k, animate) {
   };
   if (!animate || reduceMotion()) { fill(); return; }
   v.body.classList.add('swap');
-  setTimeout(() => { fill(); v.body.classList.remove('swap'); }, 140);
+  setTimeout(() => { fill(); v.body.classList.remove('swap'); }, 220);
 }
 
 function closeViewer() {
@@ -204,7 +204,7 @@ function closeViewer() {
     const card = B().revealCard ? B().revealCard(v.k) : v.opener; if (card && card.isConnected) card.focus(); };
   if (reduceMotion()) { done(); return; }
   v.dialog.classList.add('closing');
-  setTimeout(done, 180);
+  setTimeout(done, 280);
 }
 
 function slideBody(r, i) {
