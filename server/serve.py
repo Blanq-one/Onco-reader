@@ -173,14 +173,34 @@ def guard_sources(doc):
     return doc
 
 
+UNFROZEN = "not checked against a frozen list"
+
+
+def mark_unfrozen_checksums(doc):
+    """For the app: a release with no sources.csv has checksum status 'unknown'. Say what that means, in the status
+    the app prints ("checksums not checked against a frozen list") and in every finding's limitation.
+    audit.json is built from the unmarked findings, so it carries the same sentence only once."""
+    rel = doc.get("data_release")
+    if not isinstance(rel, dict) or rel.get("checksum_status") != "unknown":
+        return doc
+    rel["checksum_status"] = UNFROZEN
+    sentence = AJ.checksum_warning({"data_release": {"checksum_status": "unknown"}})
+    for f in doc.get("findings") or []:
+        lim = str(f.get("limitation") or "")
+        if sentence not in lim:
+            f["limitation"] = (lim + " " + sentence).strip()
+    return doc
+
+
 # ---------- the server ----------
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = os.name != "nt"  # on Windows reuse would let two servers share one port
 
-    def __init__(self, addr, ctx, files, loopback_only):
+    def __init__(self, addr, ctx, files, loopback_only, files_from="sources.csv"):
         self.ctx = ctx
         self.files = files
+        self.files_from = files_from  # "sources.csv", or AJ.COMPUTED when the release has no sources.csv
         self.loopback_only = loopback_only
         self.lock = threading.Lock()  # the engine keeps module state, so one audit at a time
         if ":" in addr[0]:
@@ -377,14 +397,14 @@ class Handler(BaseHTTPRequestHandler):
         return guard_sources(doc)
 
     def _audit(self, body):
-        self._json(200, self._run_audit(body))
+        self._json(200, mark_unfrozen_checksums(self._run_audit(body)))
 
     def _audit_json(self, body):
         if self.server.files is None:
             raise ApiError(503, "the release checksums (sources.csv) could not be read, so audit.json cannot be made")
         doc = self._run_audit(body)
         try:
-            audit = AJ.build_audit(doc, self.server.files)
+            audit = AJ.build_audit(doc, self.server.files, files_from=self.server.files_from)
         except ValueError:
             raise ApiError(500, "export failed")
         self._json(200, audit)
@@ -547,17 +567,20 @@ def main(argv=None):
     if ctx.missing:
         print("Missing data layers: " + ", ".join(sorted(ctx.missing)))
     try:
-        files = AJ.read_sources(data_dir)
+        files, files_from = AJ.release_files(data_dir)
     except (OSError, ValueError) as err:
-        files = None
-        print(f"WARNING: cannot read sources.csv ({err.__class__.__name__}); /api/audit-json is off.")
+        files, files_from = None, "sources.csv"
+        print(f"WARNING: cannot read the release checksums ({err.__class__.__name__}); /api/audit-json is off.")
+    if files_from == AJ.COMPUTED:
+        print("Checksums: this release folder has no sources.csv, so audit.json lists checksums computed from the files "
+              "found here, and says they were not checked against a frozen list.")
     print(f"Guardrails: {E.GUARDRAILS_SOURCE}   PDF text: {'on (pypdf)' if pypdf else 'off (pypdf not installed)'}")
     print("audit.json: " + ("one finding per part of each sentence (--split-subclaims)" if AJ.SPLIT_SUBCLAIMS
                             else "one finding per sentence (add --split-subclaims for one per part)"))
 
     loopback_only = args.host in LOOPBACK
     try:
-        httpd = Server((args.host, args.port), ctx, files, loopback_only)
+        httpd = Server((args.host, args.port), ctx, files, loopback_only, files_from)
     except OSError as err:
         sys.exit(f"Cannot listen on {args.host}:{args.port} ({err.strerror or err}). "
                  "Is another server running? Try --port 8001.")

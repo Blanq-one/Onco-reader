@@ -34,6 +34,7 @@ audit.json always holds the machine verdicts unchanged.
 Standard library only.
 """
 import csv
+import hashlib
 import json
 import os
 import re
@@ -104,6 +105,56 @@ def read_sources(data_dir):
     if not files:
         raise ValueError("sources.csv lists no files")
     return files
+
+
+# A data file is a visible file with one of these endings, in the release folder or its raw/ subfolder.
+DATA_SUFFIXES = (".tsv", ".csv", ".gz", ".json", ".parquet")
+COMPUTED = "computed locally"
+COMPUTED_NOTE = "SHA-256 computed locally from the files found in this release folder; not compared with a frozen list."
+UNLISTED_IN_SOURCES = "not listed in sources.csv"
+UNLISTED_IN_FOLDER = "not found in this release folder"
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def compute_files(data_dir):
+    """SHA-256 of every data file found in the release folder (and its raw/ folder), sorted by name.
+
+    For a release with no sources.csv. Only files that exist are listed, so a release without RNA, or without the
+    manifests, simply lists fewer files. The checksums are of the files as they are on disk.
+    """
+    found = OrderedDict()
+    for folder in (os.path.join(data_dir, "raw"), data_dir):  # raw/ first: it is what the engine reads
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        for name in names:
+            path = os.path.join(folder, name)
+            if (name in found or name.startswith(".") or name.lower() == "sources.csv"
+                    or not name.lower().endswith(DATA_SUFFIXES) or not os.path.isfile(path)):
+                continue
+            try:
+                found[name] = _sha256(path)
+            except OSError:
+                continue
+    if not found:
+        raise ValueError("no data files were found in the release folder")
+    return [OrderedDict([("file", name), ("sha256", found[name])]) for name in sorted(found)]
+
+
+def release_files(data_dir):
+    """(files, how) for audit.json: the checksums in sources.csv when it is there ("sources.csv"), else computed
+    from the files themselves (COMPUTED). A sources.csv that exists but cannot be read still raises ValueError."""
+    if os.path.isfile(os.path.join(data_dir, "sources.csv")):
+        return read_sources(data_dir), "sources.csv"
+    return compute_files(data_dir), COMPUTED
 
 
 # ---------- small text helpers ----------
@@ -215,7 +266,7 @@ def _trace_note(trace):
     return "Cohort, step by step: " + "; ".join(steps) + "."
 
 
-def _evidence(f, ev, verdict, release, listed_files):
+def _evidence(f, ev, verdict, release, listed_files, unlisted_note=UNLISTED_IN_SOURCES):
     fid = f["id"]
     checked = str(f.get("claim_text") or "").strip()
     written = str(f.get("source_sentence") or "").strip() or checked
@@ -240,7 +291,7 @@ def _evidence(f, ev, verdict, release, listed_files):
         name, detail = (m.group(1), m.group(2)) if m else (str(entry), None)
         notes = [f"field used: {detail}"] if detail else []
         if name not in listed_files:
-            notes.append("not listed in sources.csv")
+            notes.append(unlisted_note)
         refs.append(_ref("file", name, release=release, file=name, note="; ".join(notes) or None))
     if verdict == "insufficient_evidence":
         refs.append(_ref("release", release, note="Data needed, not found in this release: " + _sentence(missing_evidence_text(f))))
@@ -253,7 +304,7 @@ def _evidence(f, ev, verdict, release, listed_files):
     return refs
 
 
-def claim_check(f, release=DEFAULT_RELEASE, listed_files=(), checksum_note=None):
+def claim_check(f, release=DEFAULT_RELEASE, listed_files=(), checksum_note=None, unlisted_note=UNLISTED_IN_SOURCES):
     """One engine finding -> one shared-format finding with kind 'claim_check'."""
     if not isinstance(f, dict) or not f.get("id"):
         raise ValueError("a finding has no id")
@@ -273,11 +324,11 @@ def claim_check(f, release=DEFAULT_RELEASE, listed_files=(), checksum_note=None)
     out["needs_human_review"] = bool(f.get("needs_human_review"))
     limitation = str(f.get("limitation") or "").strip() or "No limitation was recorded for this finding; treat it with care."
     out["limitation"] = limitation + (" " + checksum_note if checksum_note else "")
-    out["evidence"] = _evidence(f, ev, verdict, release, set(listed_files))
+    out["evidence"] = _evidence(f, ev, verdict, release, set(listed_files), unlisted_note)
     return out
 
 
-def part_checks(f, release=DEFAULT_RELEASE, listed_files=(), checksum_note=None):
+def part_checks(f, release=DEFAULT_RELEASE, listed_files=(), checksum_note=None, unlisted_note=UNLISTED_IN_SOURCES):
     """SPLIT_SUBCLAIMS: one claim_check finding per part of a multi-part sentence, each with its own verdict.
 
     Each part is turned back into an engine-shaped finding and exported with claim_check(), so it gets the same
@@ -310,7 +361,7 @@ def part_checks(f, release=DEFAULT_RELEASE, listed_files=(), checksum_note=None)
             "robustness": None,
             "missing_evidence": f.get("missing_evidence") if verdict == "insufficient_evidence" else None,
         }
-        cc = claim_check(pf, release, listed_files, checksum_note)
+        cc = claim_check(pf, release, listed_files, checksum_note, unlisted_note)
         cc["evidence"][0]["note"] = f"Part {i} of {len(parts)} of one sentence, as checked."
         cc["evidence"].insert(1, _ref("claim", f["id"], note="The whole sentence as written in the report: " + written))
         out.append(cc)
@@ -323,14 +374,19 @@ def checksum_warning(doc):
     status = (doc.get("data_release") or {}).get("checksum_status") or "unknown"
     if status == "verified":
         return None
+    if status == "unknown":  # no sources.csv in the release folder, so there was no frozen list to compare with
+        return ("Checksums not checked against a frozen list: this release folder has no sources.csv, "
+                "so these results may not describe the frozen release.")
     return (f"The local data files were not confirmed against the frozen checksums in sources.csv "
             f"(checksum status: {status}), so these results may not describe the frozen release.")
 
 
-def build_audit(doc, files, release=DEFAULT_RELEASE, team=DEFAULT_TEAM, question=None, allow_mock=False, split_subclaims=None):
+def build_audit(doc, files, release=DEFAULT_RELEASE, team=DEFAULT_TEAM, question=None, allow_mock=False, split_subclaims=None, files_from="sources.csv"):
     """The engine's findings document -> audit.json (shared format v0.2) as an ordered dict.
 
     split_subclaims: None follows the module switch SPLIT_SUBCLAIMS; True or False overrides it for this call.
+    files_from: "sources.csv" (the default) when files are the frozen list's checksums, or COMPUTED when they were
+    computed from the release folder. In that case the release says so, in the document and in every limitation.
     """
     split = SPLIT_SUBCLAIMS if split_subclaims is None else bool(split_subclaims)
     if not isinstance(doc, dict) or not isinstance(doc.get("findings"), list):
@@ -338,7 +394,7 @@ def build_audit(doc, files, release=DEFAULT_RELEASE, team=DEFAULT_TEAM, question
     if doc.get("is_mock") and not allow_mock:
         raise ValueError("refusing to export mock findings: their numbers are invented")
     if not files:
-        raise ValueError("no release files: pass the checksums from sources.csv")
+        raise ValueError("no release files: pass the checksums from sources.csv, or compute them with compute_files()")
     ids = [f.get("id") if isinstance(f, dict) else None for f in doc["findings"]]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate finding ids")
@@ -347,12 +403,14 @@ def build_audit(doc, files, release=DEFAULT_RELEASE, team=DEFAULT_TEAM, question
     title = doc.get("report_title") or "the report"
     q = question or (f"Which claims in {title} does the TCGA-BRCA release '{release}' support, contradict, "
                      f"or leave without enough evidence?")
+    computed = files_from == COMPUTED
+    unlisted = UNLISTED_IN_FOLDER if computed else UNLISTED_IN_SOURCES
     out_findings = []
     for f in doc["findings"]:
         if split and len((f.get("evidence") or {}).get("sub_checks") or []) > 1:
-            out_findings.extend(part_checks(f, release, listed, warn))
+            out_findings.extend(part_checks(f, release, listed, warn, unlisted))
         else:
-            out_findings.append(claim_check(f, release, listed, warn))
+            out_findings.append(claim_check(f, release, listed, warn, unlisted))
     out_ids = [x["id"] for x in out_findings]
     if len(out_ids) != len(set(out_ids)):
         raise ValueError("duplicate finding ids after splitting sentences into parts")
@@ -360,10 +418,18 @@ def build_audit(doc, files, release=DEFAULT_RELEASE, team=DEFAULT_TEAM, question
         ("format_version", FORMAT_VERSION),
         ("producer", OrderedDict([("team", team), ("product", PRODUCT), ("track", TRACK)])),
         ("data", OrderedDict([("dataset", DATASET),
-                              ("releases", [OrderedDict([("name", release), ("files", [OrderedDict(x) for x in files])])])])),
+                              ("releases", [_release(release, files, computed)])])),
         ("question", q),
         ("findings", out_findings),
     ])
+
+
+def _release(name, files, computed):
+    out = OrderedDict([("name", name), ("files", [OrderedDict(x) for x in files])])
+    if computed:  # said once here, and again in every finding's limitation
+        out["checksum_source"] = COMPUTED
+        out["checksum_note"] = COMPUTED_NOTE
+    return out
 
 
 # ---------- human review (kept outside audit.json) ----------

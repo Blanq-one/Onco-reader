@@ -139,9 +139,26 @@ python server\serve.py
 
 On Mac or Linux, use `python3`, forward slashes, and `PYTHONUTF8=1 python3 envelopes/unseal.py ...`.
 
-- Claims are checked against the frozen release from `fetch.py` (release A). The envelope's `release/` folder is the input for Cohort Control Tower. The engine can read that folder too (`--data-dir ..\challenge-ref\envelopes\opened\E07\release`), but it has no `sources.csv`, so its checksum status is "unknown", and `make_audit.py` needs a `sources.csv` to write the file checksums into audit.json.
+- Claims are checked against the frozen release from `fetch.py` (release A). The envelope's `release/` folder is the input for Cohort Control Tower. The engine can read that folder too, and so can the export: see [If the release folder changed](#if-the-release-folder-changed).
 - If the answer key lists each part of a sentence as its own claim, add `--split-subclaims` to `make_audit.py` or `serve.py` (see [below](#if-the-answer-key-splits-sentences)).
 - On our machine the whole run, from unsealing to a saved and validated audit.json, takes under 15 seconds.
+
+### If the release folder changed
+
+Point both the server and the export at the new release folder. These are the exact commands:
+
+```powershell
+python server\serve.py --data-dir <release folder>
+python scripts\make_audit.py <report> --data-dir <release folder>
+python ..\challenge-ref\format\validate.py out\audit.json
+```
+
+For example, the opened practice release: `--data-dir ..\challenge-ref\envelopes\opened\practice\release`. On Mac or Linux, use `python3` and forward slashes.
+
+- The folder can hold the data files directly or in a `raw/` subfolder. Files it does not have (for example no RNA) are simply not listed, and the claims that need them come back as insufficient evidence. Nothing crashes.
+- With a `sources.csv`, `data.releases[].files` in audit.json lists the checksums from it, as before.
+- Without a `sources.csv`, the SHA-256 of every data file found in the folder is computed and listed instead. The release then carries `checksum_source: "computed locally"` and a `checksum_note` saying the checksums were not compared with a frozen list, and every finding's limitation ends with "Checksums not checked against a frozen list". The app shows the same words in the status line and in each limitation.
+- For the normal frozen release nothing changes: the output is byte-for-byte the committed `out/audit.json`.
 
 ### Server options
 

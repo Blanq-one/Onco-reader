@@ -9,7 +9,10 @@ What it does:
   2. Runs the evidence engine on them (engine Context + audit), with the
      guardrails pre-check on every claim and the post-check on the result.
   3. Writes out/audit.json: one claim_check finding per claim, with the release
-     name and the file checksums from the data folder's sources.csv.
+     name and the file checksums from the data folder's sources.csv. A release
+     folder with no sources.csv (an envelope release) works too: the checksums
+     are then computed from the files found there, and audit.json says they were
+     not compared with a frozen list.
   4. Writes out/review.json: the human review queue. The shared format has no
      place for a reviewer to accept or override a claim verdict, so reviews
      live there. Pass --decisions with the app's saved decisions to fill it.
@@ -50,7 +53,7 @@ def fail(msg, code=2):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Make audit.json (shared findings format v0.2) from a report")
     ap.add_argument("report", help="the report to audit (Markdown or text)")
-    ap.add_argument("--data-dir", default=DEFAULT_DATA, help="folder with raw/, sample_manifest.csv and sources.csv")
+    ap.add_argument("--data-dir", default=DEFAULT_DATA, help="the release folder: raw/ or the data files directly, plus sample_manifest.csv and sources.csv when it has them")
     ap.add_argument("--out", default=DEFAULT_OUT, help="where to write audit.json (default: out/audit.json)")
     ap.add_argument("--review-out", help="where to write review.json (default: next to --out)")
     ap.add_argument("--decisions", help="JSON of reviewer decisions keyed by finding id (the app's saved decisions)")
@@ -76,9 +79,12 @@ def main(argv=None):
     if not os.path.isdir(data_dir):
         return fail(f"data folder not found: {data_dir}")
     try:
-        files = AJ.read_sources(data_dir)
+        files, files_from = AJ.release_files(data_dir)
     except (OSError, ValueError) as err:
         return fail(f"cannot read the release checksums: {err}")
+    if files_from == AJ.COMPUTED:
+        print("NOTE: this release folder has no sources.csv. The file checksums in audit.json are computed from the files "
+              "found here and are not compared with a frozen list; every limitation says so.", file=sys.stderr)
     decisions = None
     if args.decisions:
         try:
@@ -106,7 +112,7 @@ def main(argv=None):
     review_out = os.path.abspath(args.review_out) if args.review_out else os.path.join(os.path.dirname(out), "review.json")
     try:
         audit = AJ.build_audit(doc, files, release=args.release_name, team=args.team, question=args.question,
-                               split_subclaims=True if args.split_subclaims else None)
+                               split_subclaims=True if args.split_subclaims else None, files_from=files_from)
         review = AJ.build_review(doc, decisions, audit_file=os.path.basename(out))
     except ValueError as err:
         return fail(f"cannot export: {err}")
