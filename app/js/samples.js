@@ -35,10 +35,12 @@ function download(name, text) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function samplesPanel(f) {
-  const groups = exampleGroups(f);
+// opts.mask: a function that turns a barcode into a pseudonym (the multiple-reports view); opts.prefix keeps element ids unique.
+export function samplesPanel(f, opts = {}) {
+  let groups = exampleGroups(f);
+  if (opts.mask) groups = groups.map((g) => ({ ...g, ids: (g.ids || []).map(opts.mask) }));
   if (!groups.length) return null;
-  const pid = 'samples-' + String(f.id).replace(/\W+/g, '-');
+  const pid = 'samples-' + (opts.prefix ? opts.prefix + '-' : '') + String(f.id).replace(/\W+/g, '-');
   const body = h('div', { class: 'calc', id: pid, hidden: true },
     groups.map((g, i) => h('div', { class: 'ex-group' },
       h('h3', { id: pid + '-h' + i }, (g.part ? g.part.replace(/[.\s]+$/, '') + ': ' : '') + g.label,
@@ -46,7 +48,7 @@ export function samplesPanel(f) {
       h('p', { class: 'muted' }, shownText(g) + (g.total === 0 ? '. Nothing to list.' : '.')),
       (g.ids || []).length ? h('ul', { class: 'ids mono', tabindex: '0', role: 'region', 'aria-labelledby': pid + '-h' + i },
         g.ids.map((id) => h('li', {}, id))) : null)),
-    h('p', { class: 'muted' }, 'These are de-identified research barcodes from the organizers\' manifest. They are not linked to anything else here.'),
+    h('p', { class: 'muted' }, opts.mask ? 'Sample names here are made up for this view and are numbered separately for each report. They do not match the manifest.' : 'These are de-identified research barcodes from the organizers\' manifest. They are not linked to anything else here.'),
     h('div', { class: 'row' },
       h('button', { class: 'btn', type: 'button', onclick: async () => {
         const ids = allIds(groups);

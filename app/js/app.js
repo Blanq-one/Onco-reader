@@ -6,9 +6,10 @@ import { resultsPage, resultsShortcut } from './pages/results.js';
 import { claimPage, claimShortcut } from './pages/claim.js';
 import { extractPage } from './pages/extract.js';
 import { comparePage, reviewPage, summaryPage } from './pages/more.js';
+import { batchPage } from './pages/batch.js';
 
-const NAV = [['#/', 'Start'], ['#/extract', 'Extraction'], ['#/results', 'Results'], ['#/review', 'Review'], ['#/compare', 'Compare'], ['#/summary', 'Summary'], ['#/about', 'About']];
-const OPEN = ['/', '/about'];
+const NAV = [['#/', 'Start'], ['#/extract', 'Extraction'], ['#/reports', 'Reports'], ['#/results', 'Results'], ['#/review', 'Review'], ['#/compare', 'Compare'], ['#/summary', 'Summary'], ['#/about', 'About']];
+const OPEN = ['/', '/about', '/reports'];
 let current = { path: null };
 
 export function parseHash() {
@@ -125,6 +126,7 @@ function route() {
   else if (r.path === '/compare') ({ view, crumbs } = comparePage(r.q));
   else if (r.path === '/review') ({ view, crumbs } = reviewPage(r.q));
   else if (r.path === '/summary') view = summaryPage(r.q);
+  else if (r.path === '/reports') view = batchPage();
   else if (r.path === '/about') view = aboutPage();
   else view = notFoundPage();
 

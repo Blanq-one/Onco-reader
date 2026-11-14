@@ -1,6 +1,6 @@
 // Live mode: talks to the local server when there is one. Every call fails quietly into a message.
 // Assumed shapes (not fixed in docs/): see the final report of the build.
-import { state, setData } from './state.js';
+import { state, setData, normalize } from './state.js';
 import { store } from './util.js';
 
 export async function checkHealth() {
@@ -40,6 +40,11 @@ export async function runAudit(signal) {
   store('en.decisions', {});
   store('en.nextstep', null); // a new report starts with no recorded next step
   return j;
+}
+
+// POST /api/audit {report} for the multiple-reports view: returns the findings and leaves the open report alone.
+export async function auditOnly(text, title, signal) {
+  return normalize(await readJson(await post('/api/audit', { report: text, title: title || undefined }, signal)));
 }
 
 // POST /api/pdf-text (raw PDF bytes) -> {text}. Returns null when the server cannot do it.
