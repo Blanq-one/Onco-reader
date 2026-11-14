@@ -27,11 +27,13 @@ def read(rel):
 
 class TestNoDemoLabels(unittest.TestCase):
     def test_no_demo_in_app_text(self):
+        # Any case: several CSS classes (.interp, .dp-kicker, .limit h2) render text in capitals, so a 'Demo'
+        # in a string would show as DEMO. Comments and keys are included to keep the check simple and strict.
         # DEMO_FILE (an identifier) is fine: \b stops at the underscore.
         hits = []
         for rel, text in app_files():
             for n, line in enumerate(text.splitlines(), 1):
-                if re.search(r"\bDEMO\b", line) or re.search(r"demo mode", line, re.I):
+                if re.search(r"\bdemo\b", line, re.I):
                     hits.append(f"{rel}:{n}: {line.strip()}")
         self.assertEqual(hits, [], "DEMO wording found in app/:\n" + "\n".join(hits))
 
@@ -48,20 +50,21 @@ class TestSourceLabels(unittest.TestCase):
         self.assertIn("'Live audit of: '", ui)
         self.assertIn("'Example report: '", ui)
         self.assertIn("'Example'", ui)
-        # Live only when the server audited the report in this session.
-        self.assertRegex(ui, r"const live = state\.mode === 'live';")
+        # Live only when the server audited the report in this session (state.origin, not the page mode).
+        self.assertRegex(ui, r"const live = state\.origin === 'live';")
 
     def test_source_line_on_results_and_summary(self):
         self.assertIn("sourceLine()", read("app/js/pages/results.js"))
         self.assertIn("sourceLine()", read("app/js/pages/more.js"))
 
-    def test_live_mode_set_only_by_server_audit(self):
+    def test_live_origin_set_only_by_server_audit(self):
         sets = []
         for rel, text in app_files():
-            for m in re.finditer(r"state\.mode = '([a-z-]+)'", text):
+            for m in re.finditer(r"state\.origin = '([a-z-]+)'", text):
                 sets.append((rel, m.group(1)))
-        live = [rel for rel, mode in sets if mode == "live"]
-        self.assertEqual(live, [os.path.join("app", "js", "live.js")])
+        self.assertEqual([rel for rel, o in sets if o == "live"], [os.path.join("app", "js", "live.js")])
+        # Loading any findings file resets the origin, so file data is never labelled live.
+        self.assertIn(("app/js/state.js".replace("/", os.sep), "file"), sets)
 
 
 class TestMockWarning(unittest.TestCase):

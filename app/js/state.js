@@ -48,6 +48,7 @@ export async function loadData(file) {
     const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) throw new Error('Could not load ' + url.replace(location.origin, '') + ' (HTTP ' + r.status + ').');
     state.data = normalize(await r.json());
+    state.origin = 'file'; state.liveReport = null;
     state.source = url.replace(location.origin, '');
     state.selected = []; state.extract = null;
   } catch (e) {

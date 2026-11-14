@@ -2,7 +2,6 @@ import { h, store, fmtNum, plural, toast } from '../util.js';
 import { state, loadData, findings, DEMO_FILE } from '../state.js';
 import { checkHealth, extractReport, pdfText } from '../live.js';
 import { stackTable, checksumBadge } from '../ui.js';
-export { checksumBadge };
 
 const rerender = () => window.dispatchEvent(new Event('hashchange'));
 const MAX_CHARS = 100000;
@@ -71,7 +70,7 @@ async function liveBox(slot) {
       ta.value = await f.text(); state.reportTitle = f.name; say('', '');
     } else { say('err', 'Use a .md, .txt or .pdf file, or paste the text.'); }
   });
-  const practice = h('button', { class: 'btn', type: 'button', id: 'practice-btn' }, 'Use the example report text');
+  const practice = h('button', { class: 'btn', type: 'button', id: 'practice-btn' }, 'Fill in the example report text');
   practice.onclick = async () => {
     try {
       const r = await fetch(new URL('../../samples/practice_brief.md', import.meta.url).href);

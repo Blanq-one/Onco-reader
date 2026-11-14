@@ -1,7 +1,7 @@
 import { h, countUp, copyText, toast, fmtNum, fmtValue, pct, plural } from '../util.js';
 import { state, findings, isBlocked, cannotAnswer, hasNumber, VERDICT, FLAG_TEXT } from '../state.js';
 import { samplesPanel } from '../samples.js';
-import { verdictBadge, statusPill, referenceLine, isTraced, checksumOk, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText, isSurvivalGroups, deathsText } from '../ui.js';
+import { verdictBadge, statusPill, referenceLine, isTraced, checksumOk, checksumStatus, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText, isSurvivalGroups, deathsText } from '../ui.js';
 
 const enc = encodeURIComponent;
 
@@ -20,9 +20,13 @@ export function claimPage(f, q) {
   const arrow = (t, label, x) => x ? h('a', { class: 'btn', href: '#/claim/' + enc(x.id) + keep, 'aria-label': label + ': ' + x.claim_text }, t) : h('span', { class: 'btn', 'aria-disabled': 'true', style: 'opacity:.4' }, t);
   root.append(h('div', { class: 'pager no-print' }, arrow('← Previous', 'Previous claim', prev), h('span', { class: 'muted' }, 'Claim ' + (i + 1) + ' of ' + all.length), arrow('Next →', 'Next claim', next)));
   root.append(h('h1', {}, f.claim_text));
-  root.append(h('p', { class: 'plain' }, verdictBadge(f), ' ', statusPill(f), ' ', h('span', {}, plainResult(f))));
+  let pill = statusPill(f);
+  root.append(h('p', { class: 'plain' }, verdictBadge(f), ' ', pill, ' ', h('span', {}, plainResult(f))));
+  // Keep the review pill in step with a decision made further down this page.
+  const syncPill = () => { if (!pill.isConnected) { window.removeEventListener('en:decided', syncPill); return; } const p = statusPill(f); pill.replaceWith(p); pill = p; };
+  window.addEventListener('en:decided', syncPill);
   const trace = isBlocked(f) ? ['⛔', 'Stopped before any analysis. No number was computed.']
-    : isTraced(f) ? ['✓', 'Computed from ' + plural(f.evidence.source_files.length, 'source file') + ', checksums ' + (((state.data || {}).data_release || {}).checksum_status || (checksumOk() ? 'verified' : 'unknown')) + '. Limitation shown below.']
+    : isTraced(f) ? [checksumOk() ? '✓' : '⚠', 'Computed from ' + plural(f.evidence.source_files.length, 'source file') + ', checksums ' + checksumStatus() + '. Limitation shown below.']
     : ['⚠', 'No calculation to show for this claim. Limitation shown below.'];
   root.append(h('p', { class: 'trace-line' + (trace[0] === '⚠' ? ' warn' : '') }, h('span', { 'aria-hidden': 'true' }, trace[0] + ' '), trace[1]));
   root.append(...claimFacts(f));

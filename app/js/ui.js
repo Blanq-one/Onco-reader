@@ -9,6 +9,11 @@ export const forRoles = (...roles) => roles.join(' ');
 export const interpTag = () => h('span', { class: 'interp', title: 'A suggestion drawn from the findings, not a finding itself' }, 'Interpretation');
 
 // What backs a finding, worked out from the findings file itself. A missing piece shows as a warning, never as a tick.
+// The checksum status as the findings file states it: checksum_status, else checksum_verified true/false.
+export function checksumStatus(d) {
+  const r = ((d || state.data || {}).data_release) || {};
+  return r.checksum_status || (r.checksum_verified === true ? 'verified' : r.checksum_verified === false ? 'not verified' : 'unknown');
+}
 export const checksumOk = () => { const r = (state.data && state.data.data_release) || {}; return r.checksum_verified === true || r.checksum_status === 'verified'; };
 export const isTraced = (f) => hasNumber(f) && !!f.evidence.calculation && (f.evidence.source_files || []).length > 0;
 export function assuranceItems(all) {
@@ -16,48 +21,53 @@ export function assuranceItems(all) {
   const numeric = all.filter(hasNumber), traced = numeric.filter(isTraced);
   const lim = all.filter((f) => f.limitation), blocked = all.filter(isBlocked);
   return [
-    [checksumOk(), 'Frozen data', (rel.name || 'The data release') + ': checksum status ' + (rel.checksum_status || (checksumOk() ? 'verified' : 'unknown')) + (checksumOk() ? '.' : ', so treat results with care.')],
-    [traced.length === numeric.length, 'Every number traced', traced.length + ' of ' + numeric.length + ' numbers show their calculation and source files.'],
-    [lim.length === all.length, 'Limits always shown', lim.length + ' of ' + plural(all.length, 'claim') + ' carry a limitation.'],
-    [true, 'Safety checks on', (blocked.length ? plural(blocked.length, 'request') + ' stopped before any analysis (clinical, individual or personal). ' : 'Clinical, individual and personal requests are stopped before any analysis. ') + 'Data readiness only.'],
-    [true, 'A person decides', 'Your decisions are saved in review.json and never change audit.json.'],
+    [checksumOk() ? 'ok' : 'warn', checksumOk() ? 'Frozen data' : 'Checksums ' + checksumStatus(), (rel.name || 'The data release') + ': checksums ' + checksumStatus() + (checksumOk() ? '.' : ', so treat results with care.')],
+    [traced.length === numeric.length ? 'ok' : 'warn', 'Numbers traced: ' + traced.length + ' of ' + numeric.length, traced.length + ' of ' + numeric.length + ' numbers show their calculation and source files.'],
+    [lim.length === all.length ? 'ok' : 'warn', 'Limits shown: ' + lim.length + ' of ' + all.length, lim.length + ' of ' + plural(all.length, 'claim') + ' carry a limitation.'],
+    ['info', 'Stopped by safety checks: ' + blocked.length, 'Clinical, individual and personal requests are stopped before any analysis. ' + (blocked.length ? plural(blocked.length, 'request was', 'requests were') + ' stopped in this report. ' : '') + 'Data readiness only.'],
+    ['info', 'Reviews done: ' + reviewProgress().done + ' of ' + reviewProgress().total, 'A person makes the final call. Decisions are saved in review.json and never change audit.json.'],
   ];
 }
 // One row of trust badges; the full sentences open underneath on demand.
 export function trustRow(all) {
   const items = assuranceItems(all);
-  return h('details', { class: 'trust' + (items.some((i) => !i[0]) ? ' has-warn' : '') },
-    h('summary', {}, h('span', { class: 'trust-chips' }, items.map(([ok, head, text]) =>
-      h('span', { class: 'trust-chip ' + (ok ? 'ok' : 'warn'), title: text }, h('span', { 'aria-hidden': 'true' }, ok ? '✓ ' : '⚠ '), head))),
+  const IC = { ok: '✓ ', warn: '⚠ ', info: '' };
+  return h('details', { class: 'trust' },
+    h('summary', {}, h('span', { class: 'trust-chips' }, items.map(([st, head, text]) =>
+      h('span', { class: 'trust-chip ' + st, title: text }, IC[st] ? h('span', { 'aria-hidden': 'true' }, IC[st]) : null, head))),
       h('span', { class: 'trust-more' }, 'How we checked')),
-    h('ul', {}, items.map(([ok, head, text]) => h('li', { class: ok ? 'ok' : 'warn' }, h('b', {}, head + '. '), text))));
+    h('ul', {}, items.map(([st, head, text]) => h('li', { class: st }, h('b', {}, head + '. '), text))));
 }
 
 // The hero: one answer for the whole report, and the verdict mix as one bar. Legend entries filter the list.
 export function heroVerdict(all, onPick) {
-  const a = analyse(), s = STEPS[a.step], g = a.groups;
-  const segs = [['supported', 'Supported', '✓'], ['contradicted', 'Contradicted', '✕'], ['insufficient_evidence', 'Cannot settle', '?']]
-    .map(([v, label, ic]) => ({ v, label, ic, n: all.filter((f) => f.verdict === v).length }));
+  const a = analyse(), s = STEPS[a.step];
+  // One bucket per claim (stopped first, then the verdict after review), so the sentence, bar and legend agree.
+  const bucket = (f) => (isBlocked(f) ? 'blocked' : effectiveVerdict(f));
+  const segs = [['supported', 'Supported', '✓'], ['contradicted', 'Contradicted', '✕'], ['insufficient_evidence', 'Cannot settle', '?'], ['blocked', 'Stopped', '⛔']]
+    .map(([v, label, ic]) => ({ v, label, ic, n: all.filter((f) => bucket(f) === v).length }));
+  const n = Object.fromEntries(segs.map((x) => [x.v, x.n]));
   const parts = [];
-  if (g.supported.length) parts.push(g.supported.length + (g.supported.length === 1 ? ' matches' : ' match') + ' the data');
-  if (g.contradicted.length) parts.push(g.contradicted.length + (g.contradicted.length === 1 ? ' does not' : ' do not'));
-  const unsettled = g.insufficient.length + g.cannot.length;
-  if (unsettled) parts.push(unsettled + ' cannot be settled');
-  if (g.blocked.length) parts.push(g.blocked.length + (g.blocked.length === 1 ? ' was' : ' were') + ' stopped by a safety check');
+  if (n.supported) parts.push(n.supported + (n.supported === 1 ? ' matches' : ' match') + ' the data');
+  if (n.contradicted) parts.push(n.contradicted + (n.contradicted === 1 ? ' does not' : ' do not'));
+  if (n.insufficient_evidence) parts.push(n.insufficient_evidence + ' cannot be settled');
+  if (n.blocked) parts.push(n.blocked + (n.blocked === 1 ? ' was' : ' were') + ' stopped by a safety check');
   const list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0] || 'none could be checked';
-  const review = all.filter((f) => f.needs_human_review).length;
+  const rp = reviewProgress();
   return h('section', { class: 'hero-v step-' + a.step, 'aria-labelledby': 'hv-h' },
     h('div', { class: 'hv-main' },
-      h('div', { class: 'dp-kicker' }, h('span', {}, 'Verdict on this report'), interpTag()),
+      h('div', { class: 'dp-kicker' }, h('span', {}, 'Suggested next step'), interpTag()),
       h('h2', { id: 'hv-h', class: 'hv-step' }, h('span', { class: 'dp-ic', 'aria-hidden': 'true' }, s.icon), s.label),
       h('p', { class: 'hv-line' }, 'Of ' + plural(all.length, 'claim') + ', ' + list + '.'),
       h('p', { class: 'muted hv-why' }, s.text)),
     h('div', { class: 'hv-mix' },
       h('div', { class: 'hv-bar', role: 'img', 'aria-label': segs.map((x) => x.n + ' ' + x.label).join(', ') },
         segs.filter((x) => x.n).map((x) => h('i', { class: 'seg v-' + x.v, style: 'flex:' + x.n }))),
-      h('div', { class: 'hv-legend' }, segs.map((x) => h('button', { type: 'button', class: 'hv-key v-' + x.v, onclick: () => onPick && onPick({ verdict: x.v }) },
-        h('b', {}, String(x.n)), h('span', {}, x.ic + ' ' + x.label))),
-        h('button', { type: 'button', class: 'hv-key review', onclick: () => onPick && onPick({ review: true }) }, h('b', {}, String(review)), h('span', {}, 'Need review')))));
+      h('div', { class: 'hv-legend' }, segs.filter((x) => x.n).map((x) => h('button', { type: 'button', class: 'hv-key v-' + x.v,
+        onclick: () => onPick && onPick({ verdict: x.v }) },
+        h('b', {}, String(x.n)), h('span', {}, x.ic + ' ' + x.label)))),
+      rp.required ? h('button', { type: 'button', class: 'hv-review', onclick: () => onPick && onPick({ review: true }) },
+        plural(rp.required, 'claim needs', 'claims need') + " a person's review (" + rp.done + ' done)') : null));
 }
 
 export function checksumBadge(d) {
@@ -71,10 +81,10 @@ export function checksumBadge(d) {
 // anything loaded from a file (the example report, ?data=) is labelled as precomputed.
 export function sourceLine() {
   const d = state.data || {}, r = d.data_release || {};
-  const status = r.checksum_status || (r.checksum_verified === true ? 'verified' : 'unknown');
+  const status = checksumStatus(d);
   const rel = r.name || 'TCGA-BRCA frozen release';
-  const live = state.mode === 'live';
-  const title = d.report_title || (live ? state.reportTitle : '') || (live ? 'your pasted text' : 'untitled');
+  const live = state.origin === 'live';
+  const title = d.report_title || (live && state.liveReport ? state.liveReport.title : '') || (live ? 'your pasted text' : 'untitled');
   return h('p', { class: 'source-line', id: 'source-line', 'data-source': live ? 'live' : 'example' },
     live ? null : h('span', { class: 'chip ex-chip' }, 'Example'), ' ',
     (live ? 'Live audit of: ' : 'Example report: ') + title + ' · ' + rel + ' · checksums ' + status);
@@ -119,7 +129,7 @@ export function redFlags(all) {
     list.length > 4 ? h('p', { class: 'muted' }, 'and ' + (list.length - 4) + ' more') : null));
   if (!checksumOk()) cards.unshift(h('div', { class: 'flag-card warn' }, h('h3', {}, h('span', { 'aria-hidden': 'true' }, '⚠ '), 'Data files not confirmed'),
     h('p', {}, 'The data files were not checked against their checksums. Treat every number with care.')));
-  if (!cards.length) return h('section', { class: 'flags-none', role: 'status' }, 'No claims fall in a red-flag category.');
+  if (!cards.length) return h('p', { class: 'muted flags-none', role: 'status' }, 'No claims fall in a red-flag category.');
   return h('section', { class: 'flags', 'aria-labelledby': 'rf-h' }, h('h2', { id: 'rf-h' }, 'Red flags'), h('div', { class: 'flag-grid' }, cards));
 }
 const short = (t) => { t = String(t || ''); return t.length > 90 ? t.slice(0, 87).replace(/\s+\S*$/, '') + '...' : t; };
@@ -337,11 +347,12 @@ export function saveBlob(text, name) {
 // Kept per report, so the download and the data engineer's checksum table share one request.
 let auditCache = { key: null, text: null };
 export async function auditJsonText() {
-  const live = state.mode === 'live' && state.reportText;
-  const key = live ? 'live|' + state.reportTitle + '|' + state.reportText : 'demo|' + state.source;
+  const lr = state.origin === 'live' && state.liveReport && state.liveReport.text ? state.liveReport : null;
+  const live = !!lr;
+  const key = live ? 'live|' + lr.title + '|' + lr.text : 'file|' + state.source;
   if (auditCache.key === key && auditCache.text) return auditCache.text;
   const r = live
-    ? await fetch('/api/audit-json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report: state.reportText, title: state.reportTitle || undefined }) })
+    ? await fetch('/api/audit-json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report: lr.text, title: lr.title || undefined }) })
     : await fetch(dataUrl('out/audit.json'), { cache: 'no-store' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   auditCache = { key, text: await r.text() };

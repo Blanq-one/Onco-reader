@@ -92,7 +92,13 @@ function verifyBar() {
   document.documentElement.style.setProperty('--tb-h', (getComputedStyle(top).position === 'sticky' ? top.offsetHeight : 0) + 'px');
 }
 window.addEventListener('en:decided', verifyBar);
-window.addEventListener('resize', verifyBar);
+// On resize only the sticky offset changes; rebuilding the bar here would drop keyboard focus.
+window.addEventListener('resize', () => {
+  const top = document.getElementById('topbar');
+  document.documentElement.style.setProperty('--tb-h', (getComputedStyle(top).position === 'sticky' ? top.offsetHeight : 0) + 'px');
+});
+// Print the folded decision panel too.
+window.addEventListener('beforeprint', () => document.querySelectorAll('details.dp-wrap').forEach((d) => { d.open = true; }));
 function foot() {
   // A pasted report that is extracted but not yet audited is not the loaded findings: say which is which.
   const src = state.mode === 'live-extract' ? 'Report: ' + (state.reportTitle || 'your pasted text') + ' (extracted, not audited yet)'

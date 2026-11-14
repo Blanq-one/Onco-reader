@@ -13,7 +13,7 @@ function apply() {
   const f = state.filters;
   const q = f.q.trim().toLowerCase();
   let out = findings().filter((x) =>
-    (!f.verdict || x.verdict === f.verdict) &&
+    (!f.verdict || (f.verdict === 'blocked' ? isBlocked(x) : x.verdict === f.verdict)) &&
     (!f.review || x.needs_human_review) &&
     (!f.flag || (f.flag === 'none' ? !x.guardrail_flags.length : x.guardrail_flags.includes(f.flag))) &&
     (!q || (x.claim_text + ' ' + x.id + ' ' + (x.evidence.metric_name || '')).toLowerCase().includes(q)));
@@ -47,7 +47,7 @@ export function resultsPage() {
   root.append(h('h2', { class: 'list-h' }, 'Every claim'));
   root.append(h('div', { class: 'filters', role: 'search' },
     h('label', {}, 'Search', search),
-    sel('f-verdict', 'Verdict', [['', 'All'], ['supported', 'Supported'], ['contradicted', 'Contradicted'], ['insufficient_evidence', 'Insufficient evidence']], 'verdict'),
+    sel('f-verdict', 'Verdict', [['', 'All'], ['supported', 'Supported'], ['contradicted', 'Contradicted'], ['insufficient_evidence', 'Insufficient evidence'], ['blocked', 'Stopped by a safety check']], 'verdict'),
     sel('f-flag', 'Flag', [['', 'Any'], ['none', 'No flags'], ...flags.map((x) => [x, FLAG_TEXT[x] || x])], 'flag'),
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', id: 'f-review', checked: f.review, onchange: (e) => { f.review = e.target.checked; saveFilters(); draw(); } }), 'Needs review only'),
     sel('f-sort', 'Sort', [['order', 'Report order'], ['verdict', 'Verdict, problems first'], ['review', 'Needs review first'], ['text', 'Claim text A to Z']], 'sort'),

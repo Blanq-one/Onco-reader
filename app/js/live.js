@@ -36,6 +36,7 @@ export async function runAudit(signal) {
   const keep = state.extract;
   setData(j, 'your report (live)');
   state.extract = keep; state.mode = 'live';
+  state.origin = 'live'; state.liveReport = { text: state.reportText, title: state.reportTitle };
   store('en.decisions', {});
   store('en.nextstep', null); // a new report starts with no recorded next step
   return j;
