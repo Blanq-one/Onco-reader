@@ -100,6 +100,7 @@ async function auditAll(redraw) {
 }
 
 // ---------- audited reports as files, opened one at a time in a viewer ----------
+const cue = (n) => { if (window.DW && DW.sound) DW.sound.play(n); };
 let viewer = null; // { dialog, body, k, shown, opener }
 
 function drawResults(slot, live) {
@@ -178,6 +179,7 @@ function openViewer(shown, k, opener, live) {
   viewer.dialog.classList.remove('closing');
   document.documentElement.classList.add('viewer-open'); // the page behind does not scroll while the viewer is open
   viewer.dialog.showModal();
+  cue('open');
   viewer.close.focus();
 }
 
@@ -194,17 +196,19 @@ function showIn(k, animate) {
     if (animate && v.live) v.live.textContent = reportLabel(i) + ', ' + (v.k + 1) + ' of ' + n;
   };
   if (!animate || reduceMotion()) { fill(); return; }
+  cue('whoosh');
   v.body.classList.add('swap');
-  setTimeout(() => { fill(); v.body.classList.remove('swap'); }, 140);
+  setTimeout(() => { fill(); v.body.classList.remove('swap'); }, 220);
 }
 
 function closeViewer() {
   const v = viewer; if (!v || !v.dialog.open) return;
   const done = () => { v.dialog.close(); v.dialog.classList.remove('closing'); document.documentElement.classList.remove('viewer-open');
     const card = B().revealCard ? B().revealCard(v.k) : v.opener; if (card && card.isConnected) card.focus(); };
+  cue('close');
   if (reduceMotion()) { done(); return; }
   v.dialog.classList.add('closing');
-  setTimeout(done, 180);
+  setTimeout(done, 280);
 }
 
 function slideBody(r, i) {

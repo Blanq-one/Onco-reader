@@ -8,6 +8,22 @@ import { extractPage } from './pages/extract.js';
 import { comparePage, reviewPage, summaryPage } from './pages/more.js';
 import { batchPage } from './pages/batch.js';
 
+// The four symbol controls (Sound, Motion, Effects, Quiet everything). Static SVG markup from the kit; js/fx/controls.js binds it.
+const CONTROLS = `<div class="dw-controls" role="group" aria-label="Sound, motion, effects and quiet">
+  <button class="dw-ico" type="button" id="dw-sound" data-snd="none" aria-pressed="true" aria-label="Sound on" title="Sound on. Press to turn off.">
+    <svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><g class="on-only"><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a8 8 0 0 1 0 11"/></g><path class="off-only" d="M4 20 20 4"/></svg>
+  </button>
+  <button class="dw-ico" type="button" id="dw-motion" data-snd="none" aria-pressed="true" aria-label="Motion on" title="Motion on. Press to turn off.">
+    <svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path class="on-only" d="M2.5 9c2-2.6 3.5-2.6 5.5 0s3.5 2.6 5.5 0 3.5-2.6 5.5 0M2.5 15c2-2.6 3.5-2.6 5.5 0s3.5 2.6 5.5 0 3.5-2.6 5.5 0"/><g class="off-only"><path d="M8.5 6.5v11M15.5 6.5v11"/></g></svg>
+  </button>
+  <button class="dw-ico" type="button" id="dw-fx" data-snd="none" aria-pressed="true" aria-label="Effects on" title="Effects on (ambient particles, light that follows the pointer, parallax). Press to turn off.">
+    <svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3.500l1.800 5.100L18 10.400l-5.200 1.800L11 17.300l-1.800-5.100L4 10.400l5.200-1.800z"/><g class="on-only"><path d="M18.500 15.500v4M16.500 17.500h4"/><path d="M19 3.500v2.500M17.750 4.750h2.500"/></g><path class="off-only" d="M4 20 20 4"/></svg>
+  </button>
+  <button class="dw-ico" type="button" id="dw-quiet" data-snd="none" aria-pressed="false" aria-label="Quiet everything" title="Quiet everything: sound, motion and effects off. Press again to bring them back.">
+    <svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.500"/><path d="M8 12h8"/></svg>
+  </button>
+</div>
+`;
 const NAV = [['#/', 'Start'], ['#/extract', 'Extraction'], ['#/reports', 'Reports'], ['#/results', 'Results'], ['#/review', 'Review'], ['#/compare', 'Compare'], ['#/summary', 'Summary'], ['#/about', 'About']];
 const OPEN = ['/', '/about', '/reports'];
 let current = { path: null };
@@ -29,14 +45,15 @@ function buildShell() {
     h('div', { class: 'top-menu', id: 'top-menu' },
       h('nav', { 'aria-label': 'Main' }, NAV.map(([href, label]) => h('a', { href, 'data-nav': href }, label))),
       roleSwitcher(),
-      h('button', { class: 'btn', type: 'button', id: 'theme', onclick: toggleTheme }, ''),
+      h('button', { class: 'dw-ico theme-ico', type: 'button', id: 'theme', onclick: toggleTheme }, ''),
       h('button', { class: 'btn', type: 'button', 'aria-label': 'Keyboard shortcuts', onclick: openHelp }, '?', h('span', { class: 'phone-only', 'aria-hidden': 'true' }, ' Keyboard shortcuts'))));
+  const fx = document.createElement('div'); fx.innerHTML = CONTROLS; document.getElementById('top-menu').append(fx.firstElementChild);
   setThemeLabel();
   document.body.append(helpDialog());
 }
 // Same findings, different detail: see ROLES in state.js. The choice is remembered in this browser.
 function roleSwitcher() {
-  const sel = h('select', { id: 'role-select', 'aria-describedby': 'role-help' },
+  const sel = h('select', { id: 'role-select', 'aria-describedby': 'role-help', title: 'View as' },
     Object.entries(ROLES).map(([k, r]) => h('option', Object.assign({ value: k }, k === getRole() ? { selected: true } : {}), r.label)));
   sel.addEventListener('change', () => {
     const r = setRole(sel.value);
@@ -59,7 +76,13 @@ function setMenu(open, refocus) {
 function setThemeLabel() {
   const light = document.documentElement.dataset.theme === 'light';
   const b = document.getElementById('theme');
-  if (b) { b.textContent = light ? 'Dark theme' : 'Light theme'; }
+  if (!b) return;
+  // An icon button like the other controls: a moon offers dark, a sun offers light.
+  const label = light ? 'Switch to dark theme' : 'Switch to light theme';
+  b.setAttribute('aria-label', label); b.title = label;
+  b.innerHTML = light
+    ? '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>'
+    : '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>';
 }
 function toggleTheme() {
   const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
@@ -139,7 +162,12 @@ function route() {
   document.getElementById('crumbs-slot').replaceChildren(crumbs || '');
   const main = document.getElementById('main');
   if (!reduceMotion()) view.classList.add('page-enter');
+  // Soft choreography: the page's blocks rise in one after another as they come into view.
+  // The limitation is never held back, even for a moment.
+  [...view.children].forEach((c) => { if (!c.classList.contains('limit')) c.setAttribute('data-reveal', ''); });
   main.replaceChildren(view);
+  if (window.DW && DW.motion) DW.motion.reveal(view);
+  if (prev && prev !== current.path && window.DW && DW.sound) DW.sound.play('whoosh');
   document.title = (view.dataset.title ? view.dataset.title + ' | ' : '') + 'Evidence Navigator';
   window.scrollTo(0, current.path === '/results' && prev !== '/results' ? state.scroll : 0);
   main.focus({ preventScroll: true });
@@ -163,9 +191,16 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'c' && p !== '/compare') go('#/compare');
 });
 
+function initFx() {
+  if (!window.DW || !DW.controls) return;
+  try { DW.motion.init(); DW.controls.init(); DW.sound.autowire(); } catch (e) { /* effects are never essential */ }
+}
+window.addEventListener('en:decided', () => window.DW && DW.sound && DW.sound.play('success'));
+
 (async function init() {
   setRole(getRole());
   buildShell();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initFx); else initFx();
   if (dataParam()) await loadData();
   if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#/');
   route();

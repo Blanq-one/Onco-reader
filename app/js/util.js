@@ -24,7 +24,8 @@ function add(el, kids) {
     el.append(k.nodeType ? k : document.createTextNode(String(k)));
   }
 }
-export const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Reduced when the system asks for it or the Motion control is off (js/fx keeps class "fx" on <html> only while motion is on).
+export const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches || !document.documentElement.classList.contains('fx');
 export const pct = (n, d) => (d ? (100 * n / d).toFixed(1) + '%' : 'n/a');
 export function fmtNum(n) { return n == null ? 'n/a' : Number(n).toLocaleString('en-US'); }
 // "1 claim", "2 claims", "1 needs review" / "3 need review": count text always agrees with its number.
@@ -36,6 +37,10 @@ export function fmtValue(v) {
 export function countUp(el, to, ms = 500) {
   el.textContent = fmtNum(to);
   if (reduceMotion() || !Number.isFinite(to) || to < 2) return;
+  if (window.DW && DW.motion && DW.motion.tween) { // the shared animation loop from js/fx
+    DW.motion.tween({ from: 0, to, dur: ms, ease: 'outCubic', update: (v) => { el.textContent = fmtNum(Math.round(v)); } });
+    return;
+  }
   const t0 = performance.now();
   const tick = (t) => {
     const p = Math.min(1, (t - t0) / ms);
