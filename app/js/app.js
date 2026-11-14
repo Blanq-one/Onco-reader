@@ -1,5 +1,4 @@
 import { h, store, toast, reduceMotion } from './util.js';
-import { verificationBar } from './ui.js';
 import { state, dataParam, loadData, byId, findings, ROLES, getRole, setRole } from './state.js';
 import { startPage, aboutPage, notFoundPage } from './pages/start.js';
 import { resultsPage, resultsShortcut } from './pages/results.js';
@@ -82,24 +81,6 @@ function banner() {
   slot.replaceChildren(d && d.is_mock ? h('div', { class: 'banner', role: 'alert' },
     'Synthetic sample data. These numbers are not real results.') : '');
 }
-// The sticky human-in-the-loop bar: shown on the report views once findings are loaded.
-const BAR_ON = ['/results', '/claim', '/review', '/summary', '/compare'];
-function verifyBar() {
-  const slot = document.getElementById('verify-slot');
-  const on = state.data && BAR_ON.includes(current.path);
-  slot.hidden = !on;
-  slot.replaceChildren(on ? verificationBar() : '');
-  const top = document.getElementById('topbar');
-  document.documentElement.style.setProperty('--tb-h', (getComputedStyle(top).position === 'sticky' ? top.offsetHeight : 0) + 'px');
-}
-window.addEventListener('en:decided', verifyBar);
-// On resize only the sticky offset changes; rebuilding the bar here would drop keyboard focus.
-window.addEventListener('resize', () => {
-  const top = document.getElementById('topbar');
-  document.documentElement.style.setProperty('--tb-h', (getComputedStyle(top).position === 'sticky' ? top.offsetHeight : 0) + 'px');
-});
-// Print the folded decision panel too.
-window.addEventListener('beforeprint', () => document.querySelectorAll('details.dp-wrap').forEach((d) => { d.open = true; }));
 function foot() {
   // A pasted report that is extracted but not yet audited is not the loaded findings: say which is which.
   const src = state.mode === 'live-extract' ? 'Report: ' + (state.reportTitle || 'your pasted text') + ' (extracted, not audited yet)'
@@ -131,7 +112,7 @@ function route() {
   else view = notFoundPage();
 
   current = { path: r.path.startsWith('/claim/') ? '/claim' : r.path, id: m && m[1] };
-  banner(); foot(); verifyBar();
+  banner(); foot();
   document.querySelectorAll('[data-nav]').forEach((a) => {
     const on = a.dataset.nav === '#' + (current.path === '/claim' ? '/results' : current.path);
     on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');

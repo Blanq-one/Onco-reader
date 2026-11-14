@@ -11,10 +11,9 @@ const when = (iso) => { try { return new Date(iso).toLocaleString(); } catch (e)
 export function decisionPanel(where) {
   const a = analyse();
   const s = STEPS[a.step];
-  const sec = h('section', { class: 'card decision-panel step-' + a.step, 'aria-labelledby': 'dp-h-' + where, id: 'decision' });
+  const sec = h('section', { class: 'step-section decision-panel step-' + a.step, 'aria-labelledby': 'dp-h-' + where, id: 'decision' });
   sec.append(
-    h('div', { class: 'dp-kicker' }, h('span', {}, 'Suggested next step'), interpTag()),
-    h('h2', { id: 'dp-h-' + where, class: 'dp-step' }, h('span', { class: 'dp-ic', 'aria-hidden': 'true' }, s.icon), s.label),
+    h('h2', { id: 'dp-h-' + where, class: 'dp-step' }, 'Suggested next step: ' + s.label, interpTag()),
     h('p', { class: 'dp-why' }, s.text + (a.groups.overridden.length ? ' This counts the verdicts as changed by reviewers.' : '')));
 
   sec.append(h('div', { class: 'dp-cols' },

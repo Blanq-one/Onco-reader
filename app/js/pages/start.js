@@ -1,7 +1,7 @@
 import { h, store, fmtNum, plural, toast } from '../util.js';
 import { state, loadData, findings, DEMO_FILE } from '../state.js';
 import { checkHealth, extractReport, pdfText } from '../live.js';
-import { stackTable, checksumBadge } from '../ui.js';
+import { stackTable, checksumBadge, verdictMark } from '../ui.js';
 
 const rerender = () => window.dispatchEvent(new Event('hashchange'));
 const MAX_CHARS = 100000;
@@ -115,10 +115,10 @@ export function aboutPage() {
     h('li', {}, 'Every finding shows its limitation. It cannot be hidden.'),
     h('li', {}, 'A person makes the final call on anything marked needs review.'))));
   root.append(h('section', { class: 'card' }, h('h2', {}, 'What each verdict means'), h('dl', { class: 'keys' },
-    h('dt', {}, h('span', { class: 'badge v-supported' }, '✓ Supported')), h('dd', {}, 'The data, read the way the claim is worded, meets the claim.'),
-    h('dt', {}, h('span', { class: 'badge v-contradicted' }, '✕ Contradicted')), h('dd', {}, 'The data, read the same way, does not meet the claim.'),
-    h('dt', {}, h('span', { class: 'badge v-insufficient_evidence' }, '? Insufficient evidence')), h('dd', {}, 'The data cannot settle the claim: too few samples, a missing column, or no measurable threshold.'),
-    h('dt', {}, h('span', { class: 'badge v-blocked' }, '⊘ Blocked')), h('dd', {}, 'The request was stopped before any analysis. No number is shown.'))));
+    h('dt', {}, verdictMark('supported', 'Supported')), h('dd', {}, 'The data, read the way the claim is worded, meets the claim.'),
+    h('dt', {}, verdictMark('contradicted', 'Contradicted')), h('dd', {}, 'The data, read the same way, does not meet the claim.'),
+    h('dt', {}, verdictMark('insufficient_evidence', 'Insufficient evidence')), h('dd', {}, 'The data cannot settle the claim: too few samples, a missing column, or no measurable threshold.'),
+    h('dt', {}, verdictMark('blocked', 'Stopped by a safety check')), h('dd', {}, 'The request was stopped before any analysis. No number is shown.'))));
   const notes = d && d.data_notes;
   const sec = h('section', { class: 'card' }, h('h2', {}, 'Which clinical column was used and why'));
   if (!notes || !notes.length) sec.append(h('p', { class: 'muted' }, 'This findings file has no data notes.'));
@@ -137,7 +137,7 @@ export function aboutPage() {
 }
 
 export function notFoundPage() {
-  return h('div', { class: 'page empty', 'data-title': 'Not found' }, h('div', { class: 'ic', 'aria-hidden': 'true' }, '\u{1F9ED}'),
+  return h('div', { class: 'page empty', 'data-title': 'Not found' }, 
     h('h1', {}, 'That page does not exist'), h('p', { class: 'muted' }, 'The link may be old, or the claim is not in the loaded file.'),
     h('a', { class: 'btn primary', href: '#/' }, 'Go to Start'));
 }

@@ -3,7 +3,7 @@
 import { h, fmtNum, plural, reduceMotion, toast } from '../util.js';
 import { state, isBlocked } from '../state.js';
 import { checkHealth, auditOnly, pdfText } from '../live.js';
-import { verdictBadge, plainResult } from '../ui.js';
+import { verdictBadge, plainResult, countsTable } from '../ui.js';
 import { samplesPanel } from '../samples.js';
 import { reportLabel, tally, pseudonymizer } from '../batch_logic.js';
 
@@ -212,14 +212,9 @@ function slideBody(r, i) {
   if (r.status === 'working') return [h('h3', {}, label), h('div', { class: 'progress indet', 'aria-hidden': 'true' }, h('i')), h('p', { class: 'muted' }, 'Auditing this report...')];
   if (r.status === 'failed') return [h('h3', {}, label), h('div', { class: 'notice err', role: 'alert' }, 'This report could not be audited. ' + r.error), h('p', { class: 'muted' }, 'The other reports are not affected.')];
   const fs = r.doc.findings, t = tally(fs, isBlocked), pseudo = pseudonymizer();
-  const seg = (n, cls, text) => n ? h('span', { class: 'seg ' + cls, style: 'flex-grow:' + n, title: n + ' ' + text }, n) : null;
   return [
     h('div', { class: 'slide-head' }, h('h3', {}, label), h('span', { class: 'muted' }, plural(t.total, 'claim') + ' checked')),
-    h('div', { class: 'vbar', role: 'img', 'aria-label': t.supported + ' supported, ' + t.contradicted + ' contradicted, ' + t.insufficient + ' insufficient evidence, ' + t.blocked + ' blocked' },
-      seg(t.supported, 'v-supported', 'supported'), seg(t.contradicted, 'v-contradicted', 'contradicted'), seg(t.insufficient, 'v-insufficient_evidence', 'insufficient evidence'), seg(t.blocked, 'v-blocked', 'blocked')),
-    h('div', { class: 'scorecard mini', role: 'group', 'aria-label': label + ' figures' },
-      [['v-supported', 'Match', t.supported], ['v-contradicted', 'Mismatch', t.contradicted], ['v-insufficient_evidence', 'Cannot settle', t.insufficient], ['v-blocked', 'Stopped', t.blocked], ['review', 'Need review', t.review]]
-        .map(([cls, l, v]) => h('div', { class: 'sc-cell ' + cls + (v ? '' : ' zero') }, h('span', { class: 'sc-label' }, l), h('span', { class: 'sc-value' }, String(v))))),
+    countsTable([[t.supported, 'Supported'], [t.contradicted, 'Contradicted'], [t.insufficient, 'Insufficient evidence'], [t.blocked, 'Stopped by a safety check'], [t.review, 'Needs review']], label + ' counts', 'mini'),
     h('ul', { class: 'rep-claims' }, fs.map((f) => h('li', {},
       verdictBadge(f), h('p', { class: 'claim-text' }, f.claim_text), h('p', { class: 'muted' }, plainResult(f)),
       isBlocked(f) ? null : samplesPanel(f, { mask: pseudo, prefix: 'r' + i })))),

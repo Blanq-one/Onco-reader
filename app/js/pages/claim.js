@@ -25,10 +25,10 @@ export function claimPage(f, q) {
   // Keep the review pill in step with a decision made further down this page.
   const syncPill = () => { if (!pill.isConnected) { window.removeEventListener('en:decided', syncPill); return; } const p = statusPill(f); pill.replaceWith(p); pill = p; };
   window.addEventListener('en:decided', syncPill);
-  const trace = isBlocked(f) ? ['⊘', 'Stopped before any analysis. No number was computed.']
-    : isTraced(f) ? [checksumOk() ? '✓' : '⚠', 'Computed from ' + plural(f.evidence.source_files.length, 'source file') + ', checksums ' + checksumStatus() + '. Limitation shown below.']
-    : ['⚠', 'No calculation to show for this claim. Limitation shown below.'];
-  root.append(h('p', { class: 'trace-line' + (trace[0] === '⚠' ? ' warn' : '') }, h('span', { 'aria-hidden': 'true' }, trace[0] + ' '), trace[1]));
+  const trace = isBlocked(f) ? ['stopped', 'Stopped before any analysis. No number was computed.']
+    : isTraced(f) ? [checksumOk() ? 'ok' : 'warn', 'Computed from ' + plural(f.evidence.source_files.length, 'source file') + ', checksums ' + checksumStatus() + '. Limitation shown below.']
+    : ['warn', 'No calculation to show for this claim. Limitation shown below.'];
+  root.append(h('p', { class: 'trace-line' + (trace[0] === 'warn' ? ' warn' : '') }, trace[1]));
   root.append(...claimFacts(f));
 
   // verdict / blocked / cannot answer
@@ -56,7 +56,7 @@ export function claimPage(f, q) {
       h('p', { class: 'caption', style: 'margin:4px 0 8px', 'data-for': forRoles('researcher', 'engineer') }, caption(f)),
       referenceLine(f),
       h('div', { class: 'muted', 'data-for': forRoles('engineer') }, 'Metric: ', h('span', { class: 'mono' }, e.metric_name || 'unknown'), ' | value ' + valueText(f))));
-    if (lowEvents) root.append(h('div', { class: 'notice', role: 'alert', 'data-for': forRoles('datause', 'researcher') }, h('b', {}, '⚠ Low event count. '), 'Too few deaths for a stable comparison. This finding is flagged for review.'));
+    if (lowEvents) root.append(h('div', { class: 'notice', role: 'alert', 'data-for': forRoles('datause', 'researcher') }, h('b', {}, 'Low event count. '), 'Too few deaths for a stable comparison. This finding is flagged for review.'));
   }
 
   // limitation: always visible
@@ -143,8 +143,8 @@ function robustness(f) {
     h('p', {}, h('b', {}, 'Alternative rule: '), r.alt_rule),
     h('p', {}, h('b', {}, 'Value under it: '), valueText(f, r.alt_value), ' (main rule: ' + valueText(f) + ')'),
     h('div', { class: 'notice ' + (r.verdict_changes ? '' : 'info'), role: 'status' }, r.verdict_changes
-      ? h('span', {}, h('b', {}, '⚠ The verdict changes '), 'under this rule. Treat the main result with care.')
-      : h('span', {}, h('b', {}, '✓ The verdict does not change '), 'under this rule.')));
+      ? h('span', {}, h('b', {}, 'The verdict changes '), 'under this rule. Treat the main result with care.')
+      : h('span', {}, h('b', {}, 'The verdict does not change '), 'under this rule.')));
   const b = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', 'aria-controls': 'rob-body' }, 'Try the alternative rule');
   b.addEventListener('click', () => { const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', String(on)); body.hidden = !on; });
   sec.append(h('p', { class: 'muted' }, 'Same claim, a different inclusion rule.'), b, body);

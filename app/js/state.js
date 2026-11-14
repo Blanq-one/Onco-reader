@@ -13,13 +13,13 @@ export const FLAG_TEXT = {
   low_event_count: 'Low event count',
 };
 export const VERDICT = {
-  supported: { label: 'Supported', icon: '✓' },
-  contradicted: { label: 'Contradicted', icon: '✕' },
-  insufficient_evidence: { label: 'Insufficient evidence', icon: '?' },
+  supported: { label: 'Supported' },
+  contradicted: { label: 'Contradicted' },
+  insufficient_evidence: { label: 'Insufficient evidence' },
 };
 export const state = {
   data: null, source: '', error: null, live: false, mode: null, extract: null, reportText: '', reportTitle: '', pdfOk: null,
-  filters: store('en.filters') || { q: '', verdict: '', review: false, flag: '', sort: 'order' },
+  filters: store('en.filters') || { q: '', verdict: '', review: false, flag: '', sort: 'verdict' },
   selected: [], scroll: 0,
 };
 

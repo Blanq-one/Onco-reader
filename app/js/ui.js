@@ -16,27 +16,24 @@ export function checksumStatus(d) {
 }
 export const checksumOk = () => { const r = (state.data && state.data.data_release) || {}; return r.checksum_verified === true || r.checksum_status === 'verified'; };
 export const isTraced = (f) => hasNumber(f) && !!f.evidence.calculation && (f.evidence.source_files || []).length > 0;
+// The facts behind a report, as plain sentences (no labels, no ticks), for the "How we checked" disclosure.
 export function assuranceItems(all) {
   const rel = (state.data && state.data.data_release) || {};
   const numeric = all.filter(hasNumber), traced = numeric.filter(isTraced);
-  const lim = all.filter((f) => f.limitation), blocked = all.filter(isBlocked);
+  const lim = all.filter((f) => f.limitation), blocked = all.filter(isBlocked), rp = reviewProgress();
   return [
-    [checksumOk() ? 'ok' : 'warn', checksumOk() ? 'Frozen data' : 'Checksums ' + checksumStatus(), (rel.name || 'The data release') + ': checksums ' + checksumStatus() + (checksumOk() ? '.' : ', so treat results with care.')],
-    [traced.length === numeric.length ? 'ok' : 'warn', 'Numbers traced: ' + traced.length + ' of ' + numeric.length, traced.length + ' of ' + numeric.length + ' numbers show their calculation and source files.'],
-    [lim.length === all.length ? 'ok' : 'warn', 'Limits shown: ' + lim.length + ' of ' + all.length, lim.length + ' of ' + plural(all.length, 'claim') + ' carry a limitation.'],
-    ['info', 'Stopped by safety checks: ' + blocked.length, 'Clinical, individual and personal requests are stopped before any analysis. ' + (blocked.length ? plural(blocked.length, 'request was', 'requests were') + ' stopped in this report. ' : '') + 'Data readiness only.'],
-    ['info', 'Reviews done: ' + reviewProgress().done + ' of ' + reviewProgress().total, 'A person makes the final call. Decisions are saved in review.json and never change audit.json.'],
+    (rel.name || 'The data release') + ' is a frozen release, and its checksums are ' + checksumStatus() + (checksumOk() ? '.' : ', so treat the results with care.'),
+    traced.length + ' of ' + numeric.length + ' numbers show their calculation and source files.',
+    lim.length + ' of ' + plural(all.length, 'claim') + ' carry a limitation.',
+    'Clinical, individual and personal requests are stopped before any analysis. ' + (blocked.length ? plural(blocked.length, 'request was', 'requests were') + ' stopped in this report. ' : 'None were stopped in this report. ') + 'This tool checks data readiness only.',
+    rp.done + ' of ' + rp.total + ' reviews are done. A person makes the final call, and decisions are saved in review.json and never change audit.json.',
   ];
 }
-// How the checks were made, as one quiet line; the full sentences open on demand.
-export function methodLine(all) {
-  const items = assuranceItems(all);
-  return h('details', { class: 'method' },
-    h('summary', {}, h('span', { class: 'm-label' }, 'Method'),
-      items.map(([st, head, text], i) => [i ? h('span', { class: 'm-sep', 'aria-hidden': 'true' }, '·') : null,
-        h('span', { class: 'm-item ' + st, title: text }, head)]),
-      h('span', { class: 'm-more' }, 'Details')),
-    h('ul', {}, items.map(([st, head, text]) => h('li', { class: st }, h('b', {}, head + '. '), text))));
+// How the checks were made, as plain sentences in a collapsed disclosure at the bottom of Results.
+export function howWeChecked(all) {
+  return h('details', { class: 'how' },
+    h('summary', {}, 'How we checked'),
+    h('ul', {}, assuranceItems(all).map((text) => h('li', {}, text))));
 }
 
 // One bucket per claim (stopped first, then the verdict after review), shared by the scorecard and the sentence.
@@ -44,50 +41,46 @@ const BUCKETS = [['supported', 'Match'], ['contradicted', 'Mismatch'], ['insuffi
 const bucketOf = (f) => (isBlocked(f) ? 'blocked' : effectiveVerdict(f));
 function bucketCounts(all) { const n = {}; BUCKETS.forEach(([v]) => { n[v] = all.filter((f) => bucketOf(f) === v).length; }); return n; }
 
-// The scorecard: the counts a judge needs, as one row of figures. Each figure filters the claim list.
-export function scorecard(all, onPick) {
-  const n = bucketCounts(all), rp = reviewProgress();
-  const cell = (cls, label, value, pick, sub) => h('button', { type: 'button', class: 'sc-cell ' + cls + (value === '0' ? ' zero' : ''), onclick: () => onPick && onPick(pick) },
-    h('span', { class: 'sc-label' }, label), h('span', { class: 'sc-value' }, value), sub ? h('span', { class: 'sc-sub' }, sub) : null);
-  return h('section', { class: 'scorecard', 'aria-label': 'Audit figures' },
-    cell('total', 'Claims checked', String(all.length), {}),
-    BUCKETS.map(([v, label]) => cell('v-' + v, label, String(n[v]), { verdict: v })),
-    cell('review', 'Human review', rp.done + '/' + rp.total, { review: true }, rp.required ? 'required' : 'claims'));
+// One plain sentence with the counts, then a one-row table of the same figures.
+export function countsSentence(all) {
+  const n = bucketCounts(all), parts = [];
+  if (n.supported) parts.push(n.supported + ' supported');
+  if (n.contradicted) parts.push(n.contradicted + ' contradicted');
+  if (n.insufficient_evidence) parts.push(n.insufficient_evidence + ' with insufficient evidence');
+  if (n.blocked) parts.push(n.blocked + ' stopped by a safety check');
+  return h('p', { class: 'counts-sentence' }, 'Of ' + plural(all.length, 'claim') + (parts.length ? ': ' + parts.join(', ') + '.' : '. None could be checked.'));
 }
-
-// The recommendation for the whole report, in words, built from the same counts.
-export function recommendation(all) {
-  const a = analyse(), s = STEPS[a.step], n = bucketCounts(all);
-  const parts = [];
-  if (n.supported) parts.push(n.supported + (n.supported === 1 ? ' matches' : ' match') + ' the data');
-  if (n.contradicted) parts.push(n.contradicted + (n.contradicted === 1 ? ' does not' : ' do not'));
-  if (n.insufficient_evidence) parts.push(n.insufficient_evidence + ' cannot be settled');
-  if (n.blocked) parts.push(n.blocked + (n.blocked === 1 ? ' was' : ' were') + ' stopped by a safety check');
-  const list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0] || 'none could be checked';
-  return h('section', { class: 'reco step-' + a.step, 'aria-labelledby': 'reco-h' },
-    h('div', { class: 'reco-label' }, h('span', {}, 'Recommended action'), interpTag()),
-    h('h2', { id: 'reco-h' }, s.label),
-    h('p', {}, 'Of ' + plural(all.length, 'claim') + ', ' + list + '. ' + s.text));
+// cells: [[value, label], ...]. Each cell is the number at 20px with its label below.
+export function countsTable(cells, label, cls) {
+  return h('table', { class: 'counts' + (cls ? ' ' + cls : ''), 'aria-label': label || 'Counts' },
+    h('tbody', {}, h('tr', {}, cells.map(([value, text]) => h('td', {}, h('b', {}, String(value)), h('span', {}, text))))));
+}
+export function scorecard(all) {
+  const n = bucketCounts(all);
+  return countsTable([[n.supported, 'Supported'], [n.contradicted, 'Contradicted'], [n.insufficient_evidence, 'Insufficient evidence'],
+    [n.blocked, 'Stopped by a safety check'], [all.filter((f) => f.needs_human_review).length, 'Needs review']], 'Audit counts');
+}
+export function reviewsLine() {
+  const p = reviewProgress();
+  return h('p', { class: 'reviews-line' }, 'Reviews: ' + p.done + ' of ' + p.total + ' done · ', h('a', { href: '#/review' }, 'Open the review queue'));
 }
 
 export function checksumBadge(d) {
   const r = (d && d.data_release) || {};
   const ok = r.checksum_verified === true || r.checksum_status === 'verified';
-  return h('span', { class: 'badge ' + (ok ? 'v-supported' : 'v-insufficient_evidence') },
-    h('span', { class: 'ic', 'aria-hidden': 'true' }, ok ? '✓' : '!'), ok ? 'Checksum verified' : 'Checksum not verified');
+  return verdictMark(ok ? 'supported' : 'insufficient_evidence', ok ? 'Checksum verified' : 'Checksum not verified');
 }
 
 // Where the results on screen come from. A live audit only when the server audited the report in this session;
 // anything loaded from a file (the example report, ?data=) is labelled as precomputed.
 export function sourceLine() {
-  const d = state.data || {}, r = d.data_release || {};
+  const d = state.data || {};
   const status = checksumStatus(d);
-  const rel = r.name || 'TCGA-BRCA frozen release';
   const live = state.origin === 'live';
   const title = d.report_title || (live && state.liveReport ? state.liveReport.title : '') || (live ? 'your pasted text' : 'untitled');
   return h('p', { class: 'source-line', id: 'source-line', 'data-source': live ? 'live' : 'example' },
-    live ? null : h('span', { class: 'chip ex-chip' }, 'Example'), ' ',
-    (live ? 'Live audit of: ' : 'Example report: ') + title + ' · ' + rel + ' · checksums ' + status);
+    live ? null : h('span', { class: 'chip ex-chip' }, 'Example'),
+    (live ? 'Live audit of: ' : 'Example report: ') + title + ' · TCGA-BRCA (frozen release) · checksums ' + status);
 }
 
 // Review progress for the whole report. Required reviews are the flagged claims; with none flagged, every claim counts.
@@ -97,16 +90,6 @@ export function reviewProgress() {
   const pool = req.length ? req : all;
   const done = pool.filter((f) => reviewStatus(f) !== 'pending').length;
   return { done, total: pool.length, required: req.length, verified: pool.length > 0 && done === pool.length };
-}
-export function verificationBar() {
-  const p = reviewProgress();
-  return h('div', { class: 'verify-in' },
-    h('span', { class: 'vb-label' }, 'Review status'),
-    h('span', { class: 'status-pill ' + (p.verified ? 'ok' : 'auto') }, p.verified ? 'Reviews recorded' : 'Automated check, awaiting review'),
-    h('span', { class: 'vb-text' }, p.done + ' of ' + p.total + (p.required ? ' required reviews done' : ' claims reviewed')),
-    h('div', { class: 'progress vb-prog', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(p.total), 'aria-valuenow': String(p.done), 'aria-label': 'Review progress' },
-      h('i', { style: 'width:' + (p.total ? 100 * p.done / p.total : 0) + '%' })),
-    p.verified ? h('a', { class: 'btn', href: '#/summary' }, 'Open the Summary') : h('a', { class: 'btn', href: '#/review' }, 'Open the review queue'));
 }
 // Per-claim review state, next to the verdict.
 export function statusPill(f) {
@@ -158,13 +141,15 @@ export function referenceLine(f) {
   if (es.length) { const s = es.reduce((m, r) => (r.events < m.events ? r : m)); items.push([s.events >= minEvents(), 'Fewest deaths ' + fmtNum(s.events) + ' (' + s.group + '), minimum ' + fmtNum(minEvents())]); }
   if (!items.length) return null;
   return h('ul', { class: 'ref-line', 'aria-label': 'Reference thresholds' }, items.map(([ok, t]) =>
-    h('li', { class: ok ? 'ok' : 'warn' }, h('span', { 'aria-hidden': 'true' }, ok ? '✓ ' : '⚠ '), t, ok ? '' : ' (low)')));
+    h('li', { class: ok ? 'ok' : 'warn' }, t, ok ? ' (meets the minimum)' : ' (below the minimum)')));
 }
 
+// An 8px square in the verdict color and the bold label in the same color (never color alone).
+export const verdictMark = (key, label) => h('span', { class: 'badge v-' + key }, h('i', { class: 'sq', 'aria-hidden': 'true' }), h('b', {}, label));
 export function verdictBadge(f) {
-  if (isBlocked(f)) return h('span', { class: 'badge v-blocked' }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '⊘'), 'Blocked');
-  const v = VERDICT[f.verdict] || { label: String(f.verdict), icon: '?' };
-  return h('span', { class: 'badge v-' + f.verdict }, h('span', { class: 'ic', 'aria-hidden': 'true' }, v.icon), v.label);
+  if (isBlocked(f)) return verdictMark('blocked', 'Stopped by a safety check');
+  const v = VERDICT[f.verdict] || { label: String(f.verdict) };
+  return verdictMark(f.verdict, v.label);
 }
 export function flagChips(f) {
   const out = f.guardrail_flags.map((x) => h('span', { class: 'chip ' + (x === 'low_event_count' ? 'warn' : 'block'),
@@ -270,7 +255,7 @@ export function breakdownChart(rows) {
       if (lowN) notes.push('under ' + plural(mg, 'sample'));
       if (lowE) notes.push('under ' + plural(me, 'death'));
       return h('div', { class: 'bk-row', role: 'listitem' },
-        h('div', {}, h('b', {}, r.group), notes.length ? h('div', { class: 'bk-note chip warn' }, '⚠ ' + notes.join(', ')) : null),
+        h('div', {}, h('b', {}, r.group), notes.length ? h('div', { class: 'bk-note chip warn' }, 'Low: ' + notes.join(', ')) : null),
         sv('svg', { viewBox: '0 0 100 22', preserveAspectRatio: 'none', 'aria-hidden': 'true' },
           sv('rect', { class: 'bk-bar' + (lowN || lowE ? ' low' : ''), x: 0, y: 3, width: Math.max(0.5, 100 * r.n / max), height: 16, rx: 2 }),
           sv('line', { class: 'bk-line', x1: 100 * mg / max, x2: 100 * mg / max, y1: 0, y2: 22, 'vector-effect': 'non-scaling-stroke' })),
@@ -329,7 +314,7 @@ export function reviewChip(f) {
   if (st === 'pending') return null;
   const c = decisions()[f.id] || {};
   if (st === 'overridden') return h('span', { class: 'chip over' }, 'Overridden: ' + vLabel(f.verdict) + ' to ' + vLabel(c.verdict));
-  return h('span', { class: 'chip rev-ok' }, st === 'accepted' ? '✓ Accepted' : '? More evidence requested');
+  return h('span', { class: 'chip rev-ok' }, st === 'accepted' ? 'Accepted' : 'More evidence requested');
 }
 
 // Source sentence, correct value, missing evidence and sub-checks for one claim.

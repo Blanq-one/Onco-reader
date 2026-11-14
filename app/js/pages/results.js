@@ -1,13 +1,11 @@
 import { h } from '../util.js';
 import { state, findings, saveFilters, FLAG_TEXT, isBlocked, hasNumber } from '../state.js';
-import { verdictBadge, methodLine, scorecard, recommendation, sourceLine, issuesTable, flagChips, headlineText, shareText, factLine, plainResult, exportButtons, forRoles } from '../ui.js';
+import { verdictBadge, howWeChecked, scorecard, countsSentence, reviewsLine, sourceLine, exportButtons, stackTable, isRatio, ratioText, groupsText, isSurvivalGroups, deathsText } from '../ui.js';
 import { decisionPanel } from '../decisionPanel.js';
-import { filesOf } from './claim.js';
-import { pct, plural } from '../util.js';
+import { pct, plural, fmtNum } from '../util.js';
 
 let active = -1;
 let shown = [];
-const ORDER = { contradicted: 0, insufficient_evidence: 1, supported: 2 };
 
 function apply() {
   const f = state.filters;
@@ -17,28 +15,43 @@ function apply() {
     (!f.review || x.needs_human_review) &&
     (!f.flag || (f.flag === 'none' ? !x.guardrail_flags.length : x.guardrail_flags.includes(f.flag))) &&
     (!q || (x.claim_text + ' ' + x.id + ' ' + (x.evidence.metric_name || '')).toLowerCase().includes(q)));
-  if (f.sort === 'verdict') out = out.slice().sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+  if (f.sort === 'verdict') out = out.slice().sort((a, b) => RANK(a) - RANK(b));
   else if (f.sort === 'review') out = out.slice().sort((a, b) => Number(!!b.needs_human_review) - Number(!!a.needs_human_review));
   else if (f.sort === 'text') out = out.slice().sort((a, b) => a.claim_text.localeCompare(b.claim_text));
   return out;
 }
 
+// Problem rows first: contradicted, then stopped by a safety check, then insufficient evidence, then supported.
+const RANK = (x) => (isBlocked(x) ? 1 : { contradicted: 0, insufficient_evidence: 2, supported: 3 }[x.verdict] ?? 3);
+// What the data says, in one short phrase: "49.9% (421 of 844)", "2.10 to 1 (...)", or the deaths in each survival group.
+function dataSays(x) {
+  if (!hasNumber(x)) return isBlocked(x) ? 'No number' : 'No number available';
+  const e = x.evidence, metric = String(e.metric_name || '');
+  if (isSurvivalGroups(x)) return deathsText(x);
+  if (isRatio(x)) return ratioText(x) + ' (' + groupsText(x) + ')';
+  if (/^(share_|coverage_|overlap_)/.test(metric) && e.denominator) return pct(e.n_samples, e.denominator) + ' (' + fmtNum(e.n_samples) + ' of ' + fmtNum(e.denominator) + ')';
+  return fmtNum(e.n_samples) + ' of ' + fmtNum(e.denominator);
+}
+
 export function resultsPage() {
   const root = h('div', { class: 'page', 'data-title': 'Results' });
   const all = findings();
-  root.append(h('div', { class: 'title-row' }, h('h1', {}, 'Audit results'), exportButtons('Download the audit')));
+  root.append(h('div', { class: 'title-row' }, h('h1', {}, 'Results'), exportButtons('Download the audit')));
   if (!all.length) {
-    root.append(h('div', { class: 'empty' }, h('div', { class: 'ic', 'aria-hidden': 'true' }, '\u{1F4ED}'), h('h2', {}, 'No claims in this file'),
+    root.append(h('div', { class: 'empty' }, h('h2', {}, 'No claims in this file'),
       h('p', { class: 'muted' }, 'The findings file loaded but holds no claims.'), h('a', { class: 'btn primary', href: '#/' }, 'Back to Start')));
     return root;
   }
-  const pick = (p) => { Object.assign(state.filters, { verdict: '', review: false }, p); saveFilters(); window.dispatchEvent(new Event('hashchange'));
-    setTimeout(() => { const l = document.getElementById('claim-list'); l && l.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50); };
-  root.append(sourceLine(), scorecard(all, pick), recommendation(all), issuesTable(all), methodLine(all));
+  root.append(sourceLine(), countsSentence(all), scorecard(all), reviewsLine(), decisionPanel('results'));
 
   const flags = [...new Set(all.flatMap((x) => x.guardrail_flags))];
   const f = state.filters;
-  const list = h('ul', { class: 'claims', id: 'claim-list' });
+  const tbody = h('tbody', {});
+  const table = h('table', { class: 'claims-t', id: 'claim-list' },
+    h('thead', {}, h('tr', {}, ['Compare', 'Claim', 'Verdict', 'Data says', 'Review', 'Evidence'].map((t) => h('th', { scope: 'col' }, t)))), tbody);
+  stackTable(table);
+  const none = h('div', { class: 'empty', hidden: true }, h('h2', {}, 'No claims match'), h('p', { class: 'muted' }, 'Change or clear the filters.'),
+    h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(f, { q: '', verdict: '', review: false, flag: '', sort: 'verdict' }); saveFilters(); window.dispatchEvent(new Event('hashchange')); } }, 'Clear filters'));
   const count = h('p', { class: 'muted', role: 'status' });
   const bar = h('div', { class: 'compare-bar no-print', hidden: true });
   const sel = (id, label, opts, key) => h('label', {}, label, h('select', { id, onchange: (e) => { f[key] = e.target.value; saveFilters(); draw(); } },
@@ -50,46 +63,42 @@ export function resultsPage() {
     sel('f-verdict', 'Verdict', [['', 'All'], ['supported', 'Supported'], ['contradicted', 'Contradicted'], ['insufficient_evidence', 'Insufficient evidence'], ['blocked', 'Stopped by a safety check']], 'verdict'),
     sel('f-flag', 'Flag', [['', 'Any'], ['none', 'No flags'], ...flags.map((x) => [x, FLAG_TEXT[x] || x])], 'flag'),
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', id: 'f-review', checked: f.review, onchange: (e) => { f.review = e.target.checked; saveFilters(); draw(); } }), 'Needs review only'),
-    sel('f-sort', 'Sort', [['order', 'Report order'], ['verdict', 'Verdict, problems first'], ['review', 'Needs review first'], ['text', 'Claim text A to Z']], 'sort'),
-    h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(f, { q: '', verdict: '', review: false, flag: '', sort: 'order' }); saveFilters(); window.dispatchEvent(new Event('hashchange')); } }, 'Clear')));
-  root.append(count, list, bar);
-  const dp = decisionPanel('results');
-  root.append(h('details', { class: 'dp-wrap' }, h('summary', {}, 'Record the team decision'), dp));
+    sel('f-sort', 'Sort', [['verdict', 'Problems first'], ['order', 'Report order'], ['review', 'Needs review first'], ['text', 'Claim text A to Z']], 'sort'),
+    h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(f, { q: '', verdict: '', review: false, flag: '', sort: 'verdict' }); saveFilters(); window.dispatchEvent(new Event('hashchange')); } }, 'Clear')));
+  root.append(count, table, none, bar, howWeChecked(all));
 
   function drawBar() {
     const s = state.selected;
     bar.hidden = !s.length;
     const two = s.length === 2;
     bar.replaceChildren(h('span', {}, s.length + ' selected. Pick two to compare.'),
-      h('a', { class: 'btn primary', href: two ? '#/compare?a=' + s[0] + '&b=' + s[1] : null, 'aria-disabled': two ? null : 'true', style: two ? null : 'opacity:.5;pointer-events:none', tabindex: two ? null : '-1' }, 'Compare selected'),
+      h('a', { class: 'btn primary', href: two ? '#/compare?a=' + s[0] + '&b=' + s[1] : null, 'aria-disabled': two ? null : 'true', style: two ? null : 'pointer-events:none', tabindex: two ? null : '-1' }, 'Compare selected'),
       h('button', { class: 'btn', type: 'button', onclick: () => { state.selected = []; draw(); } }, 'Clear selection'));
   }
   function draw() {
     shown = apply(); active = Math.min(active, shown.length - 1);
     count.textContent = shown.length + ' of ' + plural(all.length, 'claim') + ' shown';
-    if (!shown.length) {
-      list.replaceChildren(h('li', { class: 'empty' }, h('h2', {}, 'No claims match'), h('p', { class: 'muted' }, 'Change or clear the filters.'),
-        h('button', { class: 'btn', type: 'button', onclick: () => { Object.assign(f, { q: '', verdict: '', review: false, flag: '', sort: 'order' }); saveFilters(); window.dispatchEvent(new Event('hashchange')); } }, 'Clear filters')));
-    } else list.replaceChildren(...shown.map((x, i) => row(x, i)));
+    table.hidden = !shown.length; none.hidden = !!shown.length;
+    tbody.replaceChildren(...shown.map((x, i) => row(x, i)));
     drawBar();
   }
   function row(x, i) {
-    const hl = headlineText(x);
     const cb = h('input', { type: 'checkbox', 'aria-label': 'Select for compare: ' + x.claim_text, checked: state.selected.includes(x.id) });
     cb.addEventListener('change', () => {
       if (cb.checked) { if (state.selected.length >= 2) state.selected.shift(); state.selected.push(x.id); }
       else state.selected = state.selected.filter((s) => s !== x.id);
       draw();
     });
-    return h('li', { class: 'claim-row' + (i === active ? ' active' : ''), 'data-i': i },
-      h('div', { class: 'pick no-print' }, cb),
-      h('a', { class: 'claim-link', href: '#/claim/' + encodeURIComponent(x.id) }, verdictBadge(x),
-        h('div', { class: 'text' }, h('div', {}, x.claim_text),
-          h('div', { class: 'plain-line' }, plainResult(x)),
-          !x.correct_value && factLine(x) ? h('div', { class: 'muted', style: 'font-size:.9rem', 'data-for': forRoles('researcher', 'datause') }, factLine(x)) : null,
-          filesOf(x).length ? h('div', { class: 'muted mono', style: 'font-size:.8rem', 'data-for': forRoles('engineer') }, 'Files: ' + filesOf(x).join(', ')) : null,
-          h('div', { class: 'meta' }, h('span', { class: 'chip' }, x.id), flagChips(x))),
-        h('div', { class: 'num', 'data-for': forRoles('researcher', 'engineer') }, hl ? [hl, h('small', {}, shareText(x))] : h('small', {}, isBlocked(x) ? 'No number' : 'No number available'))));
+    const tr = h('tr', { class: 'claim-row' + (i === active ? ' active' : ''), 'data-i': i },
+      h('td', { class: 'pick no-print' }, cb),
+      h('td', { class: 'claim-cell' }, h('p', { class: 'claim-text' }, x.claim_text), h('a', { class: 'cid', href: '#/claim/' + encodeURIComponent(x.id) }, x.id)),
+      h('td', {}, verdictBadge(x)),
+      h('td', {}, dataSays(x)),
+      h('td', {}, x.needs_human_review ? 'needs review' : null),
+      h('td', {}, h('a', { href: '#/claim/' + encodeURIComponent(x.id), 'aria-label': 'Open the evidence for ' + x.id }, 'Open')));
+    // label each cell for the stacked phone layout (stackTable ran before the rows existed)
+    [...tr.children].forEach((c, k) => { const t = ['Compare', 'Claim', 'Verdict', 'Data says', 'Review', 'Evidence'][k]; if (t) c.setAttribute('data-label', t); });
+    return tr;
   }
   draw();
   return root;
