@@ -25,7 +25,7 @@ export function claimPage(f, q) {
   // Keep the review pill in step with a decision made further down this page.
   const syncPill = () => { if (!pill.isConnected) { window.removeEventListener('en:decided', syncPill); return; } const p = statusPill(f); pill.replaceWith(p); pill = p; };
   window.addEventListener('en:decided', syncPill);
-  const trace = isBlocked(f) ? ['⛔', 'Stopped before any analysis. No number was computed.']
+  const trace = isBlocked(f) ? ['⊘', 'Stopped before any analysis. No number was computed.']
     : isTraced(f) ? [checksumOk() ? '✓' : '⚠', 'Computed from ' + plural(f.evidence.source_files.length, 'source file') + ', checksums ' + checksumStatus() + '. Limitation shown below.']
     : ['⚠', 'No calculation to show for this claim. Limitation shown below.'];
   root.append(h('p', { class: 'trace-line' + (trace[0] === '⚠' ? ' warn' : '') }, h('span', { 'aria-hidden': 'true' }, trace[0] + ' '), trace[1]));

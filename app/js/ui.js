@@ -28,46 +28,46 @@ export function assuranceItems(all) {
     ['info', 'Reviews done: ' + reviewProgress().done + ' of ' + reviewProgress().total, 'A person makes the final call. Decisions are saved in review.json and never change audit.json.'],
   ];
 }
-// One row of trust badges; the full sentences open underneath on demand.
-export function trustRow(all) {
+// How the checks were made, as one quiet line; the full sentences open on demand.
+export function methodLine(all) {
   const items = assuranceItems(all);
-  const IC = { ok: '✓ ', warn: '⚠ ', info: '' };
-  return h('details', { class: 'trust' },
-    h('summary', {}, h('span', { class: 'trust-chips' }, items.map(([st, head, text]) =>
-      h('span', { class: 'trust-chip ' + st, title: text }, IC[st] ? h('span', { 'aria-hidden': 'true' }, IC[st]) : null, head))),
-      h('span', { class: 'trust-more' }, 'How we checked')),
+  return h('details', { class: 'method' },
+    h('summary', {}, h('span', { class: 'm-label' }, 'Method'),
+      items.map(([st, head, text], i) => [i ? h('span', { class: 'm-sep', 'aria-hidden': 'true' }, '·') : null,
+        h('span', { class: 'm-item ' + st, title: text }, head)]),
+      h('span', { class: 'm-more' }, 'Details')),
     h('ul', {}, items.map(([st, head, text]) => h('li', { class: st }, h('b', {}, head + '. '), text))));
 }
 
-// The hero: one answer for the whole report, and the verdict mix as one bar. Legend entries filter the list.
-export function heroVerdict(all, onPick) {
-  const a = analyse(), s = STEPS[a.step];
-  // One bucket per claim (stopped first, then the verdict after review), so the sentence, bar and legend agree.
-  const bucket = (f) => (isBlocked(f) ? 'blocked' : effectiveVerdict(f));
-  const segs = [['supported', 'Supported', '✓'], ['contradicted', 'Contradicted', '✕'], ['insufficient_evidence', 'Cannot settle', '?'], ['blocked', 'Stopped', '⛔']]
-    .map(([v, label, ic]) => ({ v, label, ic, n: all.filter((f) => bucket(f) === v).length }));
-  const n = Object.fromEntries(segs.map((x) => [x.v, x.n]));
+// One bucket per claim (stopped first, then the verdict after review), shared by the scorecard and the sentence.
+const BUCKETS = [['supported', 'Match'], ['contradicted', 'Mismatch'], ['insufficient_evidence', 'Cannot settle'], ['blocked', 'Stopped']];
+const bucketOf = (f) => (isBlocked(f) ? 'blocked' : effectiveVerdict(f));
+function bucketCounts(all) { const n = {}; BUCKETS.forEach(([v]) => { n[v] = all.filter((f) => bucketOf(f) === v).length; }); return n; }
+
+// The scorecard: the counts a judge needs, as one row of figures. Each figure filters the claim list.
+export function scorecard(all, onPick) {
+  const n = bucketCounts(all), rp = reviewProgress();
+  const cell = (cls, label, value, pick, sub) => h('button', { type: 'button', class: 'sc-cell ' + cls, onclick: () => onPick && onPick(pick) },
+    h('span', { class: 'sc-label' }, label), h('span', { class: 'sc-value' }, value), sub ? h('span', { class: 'sc-sub' }, sub) : null);
+  return h('section', { class: 'scorecard', 'aria-label': 'Audit figures' },
+    cell('total', 'Claims checked', String(all.length), {}),
+    BUCKETS.map(([v, label]) => cell('v-' + v, label, String(n[v]), { verdict: v })),
+    cell('review', 'Human review', rp.done + '/' + rp.total, { review: true }, rp.required ? 'required' : 'claims'));
+}
+
+// The recommendation for the whole report, in words, built from the same counts.
+export function recommendation(all) {
+  const a = analyse(), s = STEPS[a.step], n = bucketCounts(all);
   const parts = [];
   if (n.supported) parts.push(n.supported + (n.supported === 1 ? ' matches' : ' match') + ' the data');
   if (n.contradicted) parts.push(n.contradicted + (n.contradicted === 1 ? ' does not' : ' do not'));
   if (n.insufficient_evidence) parts.push(n.insufficient_evidence + ' cannot be settled');
   if (n.blocked) parts.push(n.blocked + (n.blocked === 1 ? ' was' : ' were') + ' stopped by a safety check');
   const list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0] || 'none could be checked';
-  const rp = reviewProgress();
-  return h('section', { class: 'hero-v step-' + a.step, 'aria-labelledby': 'hv-h' },
-    h('div', { class: 'hv-main' },
-      h('div', { class: 'dp-kicker' }, h('span', {}, 'Suggested next step'), interpTag()),
-      h('h2', { id: 'hv-h', class: 'hv-step' }, h('span', { class: 'dp-ic', 'aria-hidden': 'true' }, s.icon), s.label),
-      h('p', { class: 'hv-line' }, 'Of ' + plural(all.length, 'claim') + ', ' + list + '.'),
-      h('p', { class: 'muted hv-why' }, s.text)),
-    h('div', { class: 'hv-mix' },
-      h('div', { class: 'hv-bar', role: 'img', 'aria-label': segs.map((x) => x.n + ' ' + x.label).join(', ') },
-        segs.filter((x) => x.n).map((x) => h('i', { class: 'seg v-' + x.v, style: 'flex:' + x.n }))),
-      h('div', { class: 'hv-legend' }, segs.filter((x) => x.n).map((x) => h('button', { type: 'button', class: 'hv-key v-' + x.v,
-        onclick: () => onPick && onPick({ verdict: x.v }) },
-        h('b', {}, String(x.n)), h('span', {}, x.ic + ' ' + x.label)))),
-      rp.required ? h('button', { type: 'button', class: 'hv-review', onclick: () => onPick && onPick({ review: true }) },
-        plural(rp.required, 'claim needs', 'claims need') + " a person's review (" + rp.done + ' done)') : null));
+  return h('section', { class: 'reco step-' + a.step, 'aria-labelledby': 'reco-h' },
+    h('div', { class: 'reco-label' }, h('span', {}, 'Recommended action'), interpTag()),
+    h('h2', { id: 'reco-h' }, s.label),
+    h('p', {}, 'Of ' + plural(all.length, 'claim') + ', ' + list + '. ' + s.text));
 }
 
 export function checksumBadge(d) {
@@ -100,37 +100,50 @@ export function reviewProgress() {
 }
 export function verificationBar() {
   const p = reviewProgress();
-  const pill = p.verified ? h('span', { class: 'status-pill ok' }, '✓ Reviews recorded') : h('span', { class: 'status-pill auto' }, '⚙ Automated check');
-  return h('div', { class: 'verify-in' }, pill,
-    h('span', { class: 'vb-text' }, p.done + ' of ' + p.total + (p.required ? ' required reviews' : ' claims reviewed') + (p.required ? ' done' : '')),
+  return h('div', { class: 'verify-in' },
+    h('span', { class: 'vb-label' }, 'Review status'),
+    h('span', { class: 'status-pill ' + (p.verified ? 'ok' : 'auto') }, p.verified ? 'Reviews recorded' : 'Automated check, awaiting review'),
+    h('span', { class: 'vb-text' }, p.done + ' of ' + p.total + (p.required ? ' required reviews done' : ' claims reviewed')),
     h('div', { class: 'progress vb-prog', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(p.total), 'aria-valuenow': String(p.done), 'aria-label': 'Review progress' },
       h('i', { style: 'width:' + (p.total ? 100 * p.done / p.total : 0) + '%' })),
-    p.verified ? h('a', { class: 'btn', href: '#/summary' }, 'Open the Summary') : h('a', { class: 'btn primary', href: '#/review' }, 'Open the review queue'));
+    p.verified ? h('a', { class: 'btn', href: '#/summary' }, 'Open the Summary') : h('a', { class: 'btn', href: '#/review' }, 'Open the review queue'));
 }
 // Per-claim review state, next to the verdict.
 export function statusPill(f) {
   const st = reviewStatus(f);
-  const t = { pending: ['auto', '⚙ Automated check'], accepted: ['ok', '✓ Accepted by reviewer'], overridden: ['bad', '⚑ Overridden by reviewer'], more_evidence_requested: ['warn', '? More evidence requested'] }[st];
+  const t = { pending: ['auto', 'Automated check'], accepted: ['ok', 'Accepted by reviewer'], overridden: ['bad', 'Overridden by reviewer'], more_evidence_requested: ['warn', 'More evidence requested'] }[st];
   return h('span', { class: 'status-pill ' + t[0] }, t[1]);
 }
 
-// Red-flag cards: one per category, only when it has claims. Each links to the claims behind it.
-export function redFlags(all) {
-  const link = (f, extra) => h('li', {}, h('a', { href: '#/claim/' + encodeURIComponent(f.id) }, f.id), ' ', h('span', {}, short(f.claim_text)), extra ? h('span', { class: 'rf-extra' }, ' ' + extra) : null);
-  const cats = [
-    ['bad', '✕', 'Numbers that do not match the data', all.filter((f) => f.verdict === 'contradicted'), (f) => f.correct_value && f.correct_value.text ? 'Data: ' + f.correct_value.text : ''],
-    ['warn', '⚠', 'Too few events for a stable comparison', all.filter((f) => f.guardrail_flags.includes('low_event_count'))],
-    ['warn', '⇄', 'Verdict changes under another rule', all.filter((f) => f.robustness && f.robustness.verdict_changes)],
-    ['block', '⛔', 'Requests stopped before analysis', all.filter(isBlocked), (f) => '(' + f.guardrail_flags.filter((x) => FLAG_TEXT[x]).map((x) => FLAG_TEXT[x]).join(', ') + ')'],
-  ].filter((c) => c[3].length);
-  const cards = cats.map(([cls, ic, title, list, extra]) => h('div', { class: 'flag-card ' + cls },
-    h('h3', {}, h('span', { 'aria-hidden': 'true' }, ic + ' '), title, h('span', { class: 'rf-n' }, String(list.length))),
-    h('ul', {}, list.slice(0, 4).map((f) => link(f, extra && extra(f)))),
-    list.length > 4 ? h('p', { class: 'muted' }, 'and ' + (list.length - 4) + ' more') : null));
-  if (!checksumOk()) cards.unshift(h('div', { class: 'flag-card warn' }, h('h3', {}, h('span', { 'aria-hidden': 'true' }, '⚠ '), 'Data files not confirmed'),
-    h('p', {}, 'The data files were not checked against their checksums. Treat every number with care.')));
-  if (!cards.length) return h('p', { class: 'muted flags-none', role: 'status' }, 'No claims fall in a red-flag category.');
-  return h('section', { class: 'flags', 'aria-labelledby': 'rf-h' }, h('h2', { id: 'rf-h' }, 'Red flags'), h('div', { class: 'flag-grid' }, cards));
+// What the report says, as the engine read it ("Claim read as: '...'" in the calculation), for the issues table.
+function reportSays(f) {
+  const texts = [f.evidence && f.evidence.calculation].concat(((f.evidence && f.evidence.sub_checks) || []).filter((c) => c.verdict === 'contradicted').map((c) => c.calculation));
+  for (const t of texts) { const m = String(t || '').match(/Claim read as: '([^']+)'/); if (m) return m[1]; }
+  return null;
+}
+const dataShows = (f) => {
+  const cv = f.correct_value || (((f.evidence && f.evidence.sub_checks) || []).find((c) => c.correct_value) || {}).correct_value;
+  return typeof cv === 'string' ? cv : cv && (cv.text || (cv.value != null ? cv.value + ' ' + (cv.unit || '') : null));
+};
+// Issues needing attention, one row each: what kind, which claim, what the report says, what the data shows.
+export function issuesTable(all) {
+  const rows = [];
+  if (!checksumOk()) rows.push({ cls: 'warn', kind: 'Data files', claim: null, says: '', shows: 'Checksums ' + checksumStatus() + '. Treat every number with care.' });
+  all.filter((f) => !isBlocked(f) && f.verdict === 'contradicted').forEach((f) => rows.push({ cls: 'bad', kind: 'Mismatch', claim: f, says: reportSays(f), shows: dataShows(f) || headlineText(f) || 'See claim' }));
+  all.filter((f) => f.guardrail_flags.includes('low_event_count')).forEach((f) => rows.push({ cls: 'warn', kind: 'Low events', claim: f, says: '', shows: 'Too few deaths for a stable comparison' }));
+  all.filter((f) => f.robustness && f.robustness.verdict_changes).forEach((f) => rows.push({ cls: 'warn', kind: 'Unstable', claim: f, says: '', shows: 'Verdict changes under: ' + f.robustness.alt_rule }));
+  all.filter(isBlocked).forEach((f) => rows.push({ cls: 'block', kind: 'Stopped', claim: f, says: '', shows: 'Not analysed: ' + f.guardrail_flags.filter((x) => FLAG_TEXT[x]).map((x) => FLAG_TEXT[x].toLowerCase()).join(', ') }));
+  if (!rows.length) return h('p', { class: 'muted flags-none', role: 'status' }, 'No claims need attention beyond routine review.');
+  const enc = encodeURIComponent;
+  return h('section', { class: 'issues', 'aria-labelledby': 'is-h' },
+    h('h2', { id: 'is-h' }, 'Needs attention ', h('span', { class: 'count' }, String(rows.length))),
+    h('table', { class: 'issues-t' },
+      h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'Issue'), h('th', { scope: 'col' }, 'Claim'), h('th', { scope: 'col' }, 'Report says'), h('th', { scope: 'col' }, 'Data shows'))),
+      h('tbody', {}, rows.map((r) => h('tr', { class: r.cls },
+        h('td', { 'data-h': 'Issue' }, h('span', { class: 'kind ' + r.cls }, r.kind)),
+        h('td', { 'data-h': 'Claim' }, r.claim ? [h('a', { class: 'cid', href: '#/claim/' + enc(r.claim.id) }, r.claim.id), ' ', short(r.claim.claim_text)] : 'All claims'),
+        h('td', { 'data-h': 'Report says', class: 'says' }, r.says || h('span', { class: 'muted' }, 'n/a')),
+        h('td', { 'data-h': 'Data shows', class: 'shows' }, r.shows))))));
 }
 const short = (t) => { t = String(t || ''); return t.length > 90 ? t.slice(0, 87).replace(/\s+\S*$/, '') + '...' : t; };
 
@@ -149,7 +162,7 @@ export function referenceLine(f) {
 }
 
 export function verdictBadge(f) {
-  if (isBlocked(f)) return h('span', { class: 'badge v-blocked' }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '⛔'), 'Blocked');
+  if (isBlocked(f)) return h('span', { class: 'badge v-blocked' }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '⊘'), 'Blocked');
   const v = VERDICT[f.verdict] || { label: String(f.verdict), icon: '?' };
   return h('span', { class: 'badge v-' + f.verdict }, h('span', { class: 'ic', 'aria-hidden': 'true' }, v.icon), v.label);
 }
@@ -315,7 +328,7 @@ export function reviewChip(f) {
   const st = reviewStatus(f);
   if (st === 'pending') return null;
   const c = decisions()[f.id] || {};
-  if (st === 'overridden') return h('span', { class: 'chip over' }, '⚑ Overridden: ' + vLabel(f.verdict) + ' to ' + vLabel(c.verdict));
+  if (st === 'overridden') return h('span', { class: 'chip over' }, 'Overridden: ' + vLabel(f.verdict) + ' to ' + vLabel(c.verdict));
   return h('span', { class: 'chip rev-ok' }, st === 'accepted' ? '✓ Accepted' : '? More evidence requested');
 }
 

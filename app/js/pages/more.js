@@ -123,7 +123,7 @@ export function summaryPage(q) {
       h('tbody', {}, all.map((f) => { const x = dec[f.id] || {}, st = reviewStatus(f);
         return h('tr', { class: st === 'overridden' ? 'overridden' : null }, h('td', {}, link(f), ' ' + f.claim_text),
           h('td', {}, vText(f.verdict)), h('td', {}, st === 'pending' || st === 'more_evidence_requested' ? 'none' : vText(x.verdict || f.verdict)),
-          h('td', {}, st === 'overridden' ? '⚑ Overridden' : st === 'accepted' ? '✓ Accepted' : st === 'more_evidence_requested' ? 'More evidence requested' : 'Not reviewed yet'), h('td', {}, x.note || null)); }))))),
+          h('td', {}, st === 'overridden' ? 'Overridden' : st === 'accepted' ? '✓ Accepted' : st === 'more_evidence_requested' ? 'More evidence requested' : 'Not reviewed yet'), h('td', {}, x.note || null)); }))))),
     h('a', { class: 'btn no-print', href: '#/review' }, 'Open the review queue')));
 
   root.append(h('section', { class: 'card', 'aria-labelledby': 'all-h' }, h('h2', { id: 'all-h' }, 'All claims, results and limitations'),

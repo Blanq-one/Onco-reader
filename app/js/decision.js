@@ -8,7 +8,7 @@ export const STEPS = {
   proceed_review: { label: 'Proceed with review', icon: '!', text: 'Every claim matches the data, but a person must check the flagged ones before the report is used.' },
   fix: { label: 'Fix a problem', icon: '✕', text: 'At least one number in the report does not match the data. Correct it before anyone relies on the report.' },
   narrow: { label: 'Narrow the question', icon: '?', text: 'No number is wrong, but some claims cannot be settled with this data. Reword them, or narrow them to what the data holds.' },
-  stop: { label: 'Stop', icon: '⛔', text: 'None of the claims can be checked with this data, so the report cannot be trusted on these points.' },
+  stop: { label: 'Stop', icon: '⊘', text: 'None of the claims can be checked with this data, so the report cannot be trusted on these points.' },
 };
 export const STEP_ORDER = ['proceed', 'proceed_review', 'fix', 'narrow', 'stop'];
 const outOfScope = (f) => isBlocked(f) || cannotAnswer(f);

@@ -118,7 +118,7 @@ export function aboutPage() {
     h('dt', {}, h('span', { class: 'badge v-supported' }, '✓ Supported')), h('dd', {}, 'The data, read the way the claim is worded, meets the claim.'),
     h('dt', {}, h('span', { class: 'badge v-contradicted' }, '✕ Contradicted')), h('dd', {}, 'The data, read the same way, does not meet the claim.'),
     h('dt', {}, h('span', { class: 'badge v-insufficient_evidence' }, '? Insufficient evidence')), h('dd', {}, 'The data cannot settle the claim: too few samples, a missing column, or no measurable threshold.'),
-    h('dt', {}, h('span', { class: 'badge v-blocked' }, '⛔ Blocked')), h('dd', {}, 'The request was stopped before any analysis. No number is shown.'))));
+    h('dt', {}, h('span', { class: 'badge v-blocked' }, '⊘ Blocked')), h('dd', {}, 'The request was stopped before any analysis. No number is shown.'))));
   const notes = d && d.data_notes;
   const sec = h('section', { class: 'card' }, h('h2', {}, 'Which clinical column was used and why'));
   if (!notes || !notes.length) sec.append(h('p', { class: 'muted' }, 'This findings file has no data notes.'));

@@ -1,6 +1,6 @@
 import { h } from '../util.js';
 import { state, findings, saveFilters, FLAG_TEXT, isBlocked, hasNumber } from '../state.js';
-import { verdictBadge, trustRow, heroVerdict, sourceLine, redFlags, flagChips, headlineText, shareText, factLine, plainResult, exportButtons, forRoles } from '../ui.js';
+import { verdictBadge, methodLine, scorecard, recommendation, sourceLine, issuesTable, flagChips, headlineText, shareText, factLine, plainResult, exportButtons, forRoles } from '../ui.js';
 import { decisionPanel } from '../decisionPanel.js';
 import { filesOf } from './claim.js';
 import { pct, plural } from '../util.js';
@@ -26,7 +26,7 @@ function apply() {
 export function resultsPage() {
   const root = h('div', { class: 'page', 'data-title': 'Results' });
   const all = findings();
-  root.append(h('div', { class: 'title-row' }, h('h1', {}, 'Results'), exportButtons('Download the audit')));
+  root.append(h('div', { class: 'title-row' }, h('h1', {}, 'Audit results'), exportButtons('Download the audit')));
   if (!all.length) {
     root.append(h('div', { class: 'empty' }, h('div', { class: 'ic', 'aria-hidden': 'true' }, '\u{1F4ED}'), h('h2', {}, 'No claims in this file'),
       h('p', { class: 'muted' }, 'The findings file loaded but holds no claims.'), h('a', { class: 'btn primary', href: '#/' }, 'Back to Start')));
@@ -34,7 +34,7 @@ export function resultsPage() {
   }
   const pick = (p) => { Object.assign(state.filters, { verdict: '', review: false }, p); saveFilters(); window.dispatchEvent(new Event('hashchange'));
     setTimeout(() => { const l = document.getElementById('claim-list'); l && l.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50); };
-  root.append(sourceLine(), heroVerdict(all, pick), trustRow(all), redFlags(all));
+  root.append(sourceLine(), scorecard(all, pick), recommendation(all), issuesTable(all), methodLine(all));
 
   const flags = [...new Set(all.flatMap((x) => x.guardrail_flags))];
   const f = state.filters;
