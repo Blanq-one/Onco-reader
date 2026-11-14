@@ -1999,9 +1999,25 @@ def finalize_finding(f, source, ctx=None):
     return f
 
 
+REVIEWER_NOTE = {"edited": "A reviewer edited this claim before the audit; it was checked as the reviewer worded it.",
+                 "added": "A reviewer added this claim before the audit; it was not in the extracted list."}
+
+
+def mark_reviewer_origin(f, origin):
+    """Say, in the finding's evidence, that a person edited or added the claim (the exporter carries evidence.calculation)."""
+    note = REVIEWER_NOTE.get(origin)
+    if not note:
+        return f
+    ev = f["evidence"]
+    ev["reviewer_origin"] = origin
+    ev["calculation"] = (ev.get("calculation") + " " if ev.get("calculation") else "") + note
+    return f
+
+
 def evaluate_item(ctx, fid, item):
     text = item["text"] if isinstance(item, dict) else item
     source = item.get("source", text) if isinstance(item, dict) else text
+    origin = item.get("origin") if isinstance(item, dict) else None
     subs = split_subclaims(text)
     if len(subs) == 1:
         f = evaluate_claim(ctx, fid, text)
@@ -2012,7 +2028,7 @@ def evaluate_item(ctx, fid, item):
             f = blocked_finding(fid, text, guard["flags"], guard.get("reason") or "Stopped by guardrails.", total)
         else:
             f = combine_parts([evaluate_claim(ctx, fid, sub) for sub in subs], text)
-    return finalize_finding(f, source, ctx)
+    return mark_reviewer_origin(finalize_finding(f, source, ctx), origin)
 
 
 def audit(ctx, claims, title, skipped=None):

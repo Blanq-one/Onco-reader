@@ -48,7 +48,7 @@ export async function loadData(file) {
     const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) throw new Error('Could not load ' + url.replace(location.origin, '') + ' (HTTP ' + r.status + ').');
     state.data = normalize(await r.json());
-    state.origin = 'file'; state.liveReport = null;
+    state.origin = 'file'; state.liveReport = null; state.liveEdits = [];
     state.source = url.replace(location.origin, '');
     state.selected = []; state.extract = null;
   } catch (e) {
@@ -147,6 +147,8 @@ export function reviewJson() {
     review_version: '1',
     about: 'Human review of the claim verdicts in audit.json. Machine verdicts are never changed; the reviewer verdict is kept beside the original.',
     audit_file: 'audit.json', report_title: d.report_title || null, counts, items,
+    // what a person changed before the audit: edited, added or re-included claims (empty when the report was audited as extracted)
+    reviewer_edits: state.liveEdits || [],
   };
 }
 export function saveFilters() { store('en.filters', state.filters); }

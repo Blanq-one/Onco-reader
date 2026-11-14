@@ -552,3 +552,9 @@ table.cmp td.diff { background: transparent; box-shadow: inset 2px 0 var(--warn)
 @media (max-width: 640px) { .sc-label { white-space: normal; letter-spacing: .05em; } }
 .card.example.secondary h2 { font-size: .75rem; }
 .start-multi { margin-left: auto; font-size: .9rem; }
+
+/* extraction: reviewer changes */
+.reviewer-chip { margin-left: var(--s1); }
+table.ex textarea { width: 100%; box-sizing: border-box; }
+.skips li { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+table.ex td:last-child .btn { white-space: nowrap; }

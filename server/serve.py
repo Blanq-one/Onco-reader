@@ -140,7 +140,10 @@ def claims_from_body(body):
                 claims.append({"text": item, "source": item})
             elif isinstance(item, dict) and isinstance(item.get("text"), str):
                 src = item.get("source")
-                claims.append({"text": item["text"], "source": src if isinstance(src, str) and src else item["text"]})
+                claim = {"text": item["text"], "source": src if isinstance(src, str) and src else item["text"]}
+                if item.get("origin") in E.REVIEWER_NOTE:  # a reviewer edited or added it; anything else is ignored
+                    claim["origin"] = item["origin"]
+                claims.append(claim)
             else:
                 raise ApiError(400, f'claim {i} must be text or an object with a "text" field')
         skipped, title = [], _title(body, "Ad hoc claims")

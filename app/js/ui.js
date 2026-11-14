@@ -362,14 +362,20 @@ let auditCache = { key: null, text: null };
 export async function auditJsonText() {
   const lr = state.origin === 'live' && state.liveReport && state.liveReport.text ? state.liveReport : null;
   const live = !!lr;
-  const key = live ? 'live|' + lr.title + '|' + lr.text : 'file|' + state.source;
+  const key = live ? 'live|' + lr.title + '|' + (lr.claims ? JSON.stringify(lr.claims) : lr.text) : 'file|' + state.source;
   if (auditCache.key === key && auditCache.text) return auditCache.text;
+  const body = live ? JSON.stringify(lr.claims ? { claims: lr.claims, title: lr.title || undefined } : { report: lr.text, title: lr.title || undefined }) : null;
   const r = live
-    ? await fetch('/api/audit-json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report: lr.text, title: lr.title || undefined }) })
+    ? await fetch('/api/audit-json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
     : await fetch(dataUrl('out/audit.json'), { cache: 'no-store' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   auditCache = { key, text: await r.text() };
   return auditCache.text;
+}
+// "Edited by reviewer" / "Added by reviewer" for a claim a person changed before the audit.
+export function reviewerChip(f) {
+  const o = f.evidence && f.evidence.reviewer_origin;
+  return o === 'edited' || o === 'added' ? h('span', { class: 'chip review reviewer-chip' }, o === 'edited' ? 'Edited by reviewer' : 'Added by reviewer') : null;
 }
 export function exportButtons(label) {
   const audit = h('button', { class: 'btn', type: 'button', onclick: async (ev) => {

@@ -1,7 +1,7 @@
 import { h, countUp, copyText, toast, fmtNum, fmtValue, pct, plural } from '../util.js';
 import { state, findings, isBlocked, cannotAnswer, hasNumber, VERDICT, FLAG_TEXT } from '../state.js';
 import { samplesPanel } from '../samples.js';
-import { verdictBadge, statusPill, referenceLine, isTraced, checksumOk, checksumStatus, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText, isSurvivalGroups, deathsText } from '../ui.js';
+import { reviewerChip, verdictBadge, statusPill, referenceLine, isTraced, checksumOk, checksumStatus, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText, isSurvivalGroups, deathsText } from '../ui.js';
 
 const enc = encodeURIComponent;
 
@@ -21,7 +21,7 @@ export function claimPage(f, q) {
   root.append(h('div', { class: 'pager no-print' }, arrow('← Previous', 'Previous claim', prev), h('span', { class: 'muted' }, 'Claim ' + (i + 1) + ' of ' + all.length), arrow('Next →', 'Next claim', next)));
   root.append(h('h1', {}, f.claim_text));
   let pill = statusPill(f);
-  root.append(h('p', { class: 'plain' }, verdictBadge(f), ' ', pill, ' ', h('span', {}, plainResult(f))));
+  root.append(h('p', { class: 'plain' }, verdictBadge(f), ' ', pill, ' ', reviewerChip(f), reviewerChip(f) ? ' ' : null, h('span', {}, plainResult(f))));
   // Keep the review pill in step with a decision made further down this page.
   const syncPill = () => { if (!pill.isConnected) { window.removeEventListener('en:decided', syncPill); return; } const p = statusPill(f); pill.replaceWith(p); pill = p; };
   window.addEventListener('en:decided', syncPill);

@@ -2,6 +2,7 @@
 // Assumed shapes (not fixed in docs/): see the final report of the build.
 import { state, setData, normalize } from './state.js';
 import { store } from './util.js';
+import { claimsPayload, hasReviewerChanges, reviewerEdits } from './extract_logic.js';
 
 export async function checkHealth() {
   try {
@@ -30,13 +31,19 @@ export async function extractReport(text, title, signal) {
   return state.extract;
 }
 
-// POST /api/audit {report} -> same shape as out/practice_audit.json
+// POST /api/audit -> same shape as out/practice_audit.json.
+// Untouched report: {report}. After the reviewer edited, added or re-included a claim: {claims: [{text, source, origin?}]},
+// so the audit checks the reviewer's wording.
 export async function runAudit(signal) {
-  const j = await readJson(await post('/api/audit', { report: state.reportText, title: state.reportTitle || undefined }, signal));
+  const claimsMode = !!(state.extract && hasReviewerChanges(state.extract.claims));
+  const body = claimsMode ? { claims: claimsPayload(state.extract.claims), title: state.reportTitle || undefined }
+    : { report: state.reportText, title: state.reportTitle || undefined };
+  const j = await readJson(await post('/api/audit', body, signal));
   const keep = state.extract;
   setData(j, 'your report (live)');
   state.extract = keep; state.mode = 'live';
-  state.origin = 'live'; state.liveReport = { text: state.reportText, title: state.reportTitle };
+  state.origin = 'live'; state.liveReport = { text: state.reportText, title: state.reportTitle, claims: claimsMode ? body.claims : null };
+  state.liveEdits = claimsMode ? reviewerEdits(keep.claims) : [];
   store('en.decisions', {});
   store('en.nextstep', null); // a new report starts with no recorded next step
   return j;
