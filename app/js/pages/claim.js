@@ -1,5 +1,6 @@
 import { h, countUp, copyText, toast, fmtNum, fmtValue, pct, plural } from '../util.js';
 import { state, findings, isBlocked, cannotAnswer, hasNumber, VERDICT, FLAG_TEXT } from '../state.js';
+import { samplesPanel } from '../samples.js';
 import { verdictBadge, flagChips, caption, funnel, breakdownChart, reviewBlock, claimFacts, breadcrumbs, plainResult, interpTag, forRoles, isRatio, valueText, groupsText, isSurvivalGroups, deathsText } from '../ui.js';
 
 const enc = encodeURIComponent;
@@ -58,6 +59,7 @@ export function claimPage(f, q) {
 
   // calculation
   root.append(calcPanel(f));
+  { const sp = isBlocked(f) ? null : samplesPanel(f); if (sp) root.append(sp); }
   root.append(columnsUsed(f));
 
   // breakdown

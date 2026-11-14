@@ -1036,6 +1036,26 @@ def blank_finding(fid, text):
     ])
 
 
+EXAMPLES_MAX = 200  # most ids listed per group in evidence.examples; "total" is always the exact size (--examples-max changes it)
+
+
+def example_group(label, ids, kind):
+    """One group of the samples behind a number: exact total, sorted ids (capped), kind 'included' or 'fall_short'."""
+    ids = sorted(set(ids))
+    return OrderedDict([("label", label), ("total", len(ids)), ("ids", ids[:EXAMPLES_MAX]), ("kind", kind)])
+
+
+def add_examples(f, included, fall_short=None, label="Samples counted in the number", short_label="In the whole but not counted"):
+    """Attach evidence.examples to a measured finding (supported or contradicted). Blocked, unanswerable and
+    insufficient-evidence findings get nothing. ids come only from the loaded files."""
+    if f["verdict"] not in ("supported", "contradicted"):
+        return
+    groups = [example_group(label, included, "included")]
+    if fall_short is not None:
+        groups.append(example_group(short_label, fall_short, "fall_short"))
+    f["evidence"]["examples"] = groups
+
+
 REDACT_FLAGS = {"phi_like_input", "reidentification_blocked", "individual_level_request_blocked"}
 
 
@@ -1278,6 +1298,13 @@ def evaluate_claim(ctx, fid, text):
     ok = satisfied(q, value, num)
     f["verdict"] = "supported" if ok else "contradicted"
     ev["calculation"] = calc + f". Claim read as: {q['reading']}."
+    if q["kind"] == "fraction":  # a part compared with a whole: also list the denominator samples that fall short
+        counted = set(final)
+        den_ids = run_ops(pop_ids, pop_ops, "")[1]
+        add_examples(f, final, [s for s in den_ids if s not in counted], "Samples counted in the numerator",
+                     "In the denominator but not counted")
+    else:
+        add_examples(f, final, None, "Samples counted")
     lead = value if q["kind"] == "fraction" else num
     reasons = []
     if q["comparator"] not in ("~", "~c") and not (q["kind"] == "count" and q["comparator"] == "=="):
@@ -1355,6 +1382,7 @@ def sampletype_finding(ctx, f, parsed, code):
     f["cohort_trace"] = [{"step": "samples in the release", "n_before": total, "n_after": total},
                          {"step": f"sample_type is {name}", "n_before": total, "n_after": n}]
     f["verdict"] = "supported" if ok else "contradicted"
+    add_examples(f, ids, None, f"Samples of type {name}")
     review_if_near(f, q, n)
     f["limitation"] = ("Counts come from the release's sample list: one sample is one barcode, and one patient can have several samples. "
                        "The sample type is as recorded in the manifest; it was not checked against the tissue itself.")
@@ -1399,6 +1427,9 @@ def slidecount_finding(ctx, f, parsed):
     if kind:
         f["cohort_trace"].append({"step": what, "n_before": total, "n_after": n})
     f["verdict"] = "supported" if ok else "contradicted"
+    slide_col = next((c for c in rows[0] if c.strip().lower() == "slide_barcode"), next(iter(rows[0])))
+    add_examples(f, [r[slide_col] for r in rows if slide_matches(kind, r.get(col) if col else None) and r.get(slide_col)], None,
+                 f"Slides counted (slide barcodes)")
     review_if_near(f, q, n)
     f["limitation"] = ("Counts come from slide_manifest.csv, one row per slide image listed in NCI Imaging Data Commons; "
                        "a sample can have several slides, and the slides themselves were not opened or checked.")
@@ -1465,6 +1496,9 @@ def ratio_finding(ctx, f, parsed):
     ok = satisfied(q, ratio, na)
     f["verdict"] = "supported" if ok else "contradicted"
     f["evidence"]["calculation"] = calc + f". Claim read as: {q['reading']}."
+    add_examples(f, a_ids, None, f"{label_a} (numerator)")
+    if "examples" in f["evidence"]:
+        f["evidence"]["examples"].append(example_group(f"{label_b} (second group)", b_ids, "included"))
     reasons = []
     note = near_tolerance(q, ratio, na)
     if note:
@@ -1621,6 +1655,7 @@ def gene_finding(ctx, f, parsed):
                                               + f". Claim: {said}{filt_txt}.")})
         f["cohort_trace"] = steps + [{"step": f"{g} mutated", "n_before": den, "n_after": n_named[g]}]
         f["verdict"] = "supported" if ok else "contradicted"
+        add_examples(f, data["mutated"].get(g, set()) & den_set, None, f"Tumors with a mutation in {g}")
         if ok:
             f["next_actions"] = ["Check the mutation types behind the ranking before relying on it."]
             close = [name for name, c in ranked[:k + 1] if name not in genes and abs(c - n_named[g]) <= max(1, 0.03 * den)]
@@ -1665,6 +1700,11 @@ def gene_finding(ctx, f, parsed):
     ok = satisfied(q, value, num)
     f["verdict"] = "supported" if ok else "contradicted"
     f["evidence"]["calculation"] = calc + f". Claim read as: {q['reading']}."
+    mutated_ids = data["mutated"].get(g, set()) & den_set
+    if q["kind"] == "fraction":
+        add_examples(f, mutated_ids, den_set - mutated_ids, f"Tumors with a mutation in {g}", "Profiled tumors without one")
+    else:
+        add_examples(f, mutated_ids, None, f"Tumors with a mutation in {g}")
     reasons = []
     lead = value if q["kind"] == "fraction" else num
     if q["comparator"] not in ("~", "~c") and not (is_count and q["comparator"] == "=="):
@@ -1713,6 +1753,9 @@ def popsize_finding(ctx, f, parsed, total):
                           "calculation": f"{label}: {n}. Claim read as: {q['reading']}."})
     f["cohort_trace"] = [{"step": label, "n_before": n, "n_after": n}]
     f["verdict"] = "supported" if ok else "contradicted"
+    pop_ids = (ctx.all_samples if key == "samples" else sorted({L.patient_of(x) for x in ctx.all_samples}) if key == "patients"
+               else ctx.population("01"))
+    add_examples(f, pop_ids, None, "Patients counted" if key == "patients" else "Samples counted")
     review_if_near(f, q, n)
     f["limitation"] = "Counts come from the release's sample list: one sample is one barcode, and one patient can have several samples."
     if ok:
@@ -1769,6 +1812,7 @@ def extremum_finding(ctx, f, parsed, total):
                          {"step": f"has {ATTR_SPECS[key]['label']} recorded", "n_before": len(pop), "n_after": recorded}]
     f["limitation"] = limitation_for(parsed, [])
     f["verdict"] = "supported" if ok else "contradicted"
+    add_examples(f, [sid for sid in pop if ctx.attr(key, sid) in x_groups], None, f"Samples in {flt['label']}")
     if ok:
         f["next_actions"] = ["Check data quality inside the field, not just counts, before relying on the ranking."]
     else:
@@ -1896,6 +1940,7 @@ def combine_parts(parts, text):
         if VERDICT_RANK[part["verdict"]] >= VERDICT_RANK[worst["verdict"]]:
             worst = part
     f = copy.deepcopy(worst)
+    f["evidence"].pop("examples", None)  # the samples behind one number do not describe a sentence with several
     f["claim_text"] = text
     f["verdict"] = worst["verdict"]
     f["evidence"]["calculation"] = " | ".join(p["evidence"]["calculation"] for p in parts if p["evidence"]["calculation"])
@@ -1906,7 +1951,8 @@ def combine_parts(parts, text):
                                     "source_files": list(p["evidence"]["source_files"]),
                                     "correct_value": p["correct_value"]["text"] if p.get("correct_value") else None,
                                     "needs_human_review": bool(p["needs_human_review"]), "review_reason": p["review_reason"],
-                                    "guardrail_flags": list(p["guardrail_flags"])} for p in parts]
+                                    "guardrail_flags": list(p["guardrail_flags"]),
+                                    **({"examples": p["evidence"]["examples"]} if p["evidence"].get("examples") else {})} for p in parts]
     f["guardrail_flags"] = list(OrderedDict.fromkeys(fl for p in parts for fl in p["guardrail_flags"]))
     if f["verdict"] != "insufficient_evidence" and "data_cannot_answer" in f["guardrail_flags"]:
         # one part could not be answered but another has a verdict: the flag stays on that part (sub_checks)
@@ -2004,6 +2050,8 @@ def main(argv=None):
     ap.add_argument("--report", help="text or markdown file with numbered or bulleted claims")
     ap.add_argument("--claim", action="append", default=[], help="a single claim (can repeat)")
     ap.add_argument("--out", default=os.path.join("out", "findings.json"))
+    ap.add_argument("--examples-max", type=int, default=200,
+                    help="most sample ids listed per group in evidence.examples (default 200; the total is always exact)")
     ap.add_argument("--notes", action="store_true", help="print which clinical columns were chosen")
     ap.add_argument("--extract-only", action="store_true", help="show which sentences would be checked and which skipped, then stop")
     ap.add_argument("--unsafe-no-guardrails", action="store_true",
@@ -2016,7 +2064,8 @@ def main(argv=None):
             stream.reconfigure(errors="replace")
         except Exception:
             pass
-    global ALLOW_FALLBACK, GUARDRAILS_SOURCE
+    global ALLOW_FALLBACK, GUARDRAILS_SOURCE, EXAMPLES_MAX
+    EXAMPLES_MAX = max(0, args.examples_max)
     if _check_claim is None:
         if not args.unsafe_no_guardrails:
             sys.exit("src/guardrails is missing or failed to import (" + repr(_GUARD_ERROR) + ").\n"

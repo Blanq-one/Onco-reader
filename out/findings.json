@@ -121,7 +121,29 @@
           "clinical.tsv",
           "sample_manifest.csv"
         ],
-        "calculation": "samples with ER status recorded among primary tumor samples: 1048 / 1101 = 95.2%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). Claim read as: 'most' means more than 50 percent."
+        "calculation": "samples with ER status recorded among primary tumor samples: 1048 / 1101 = 95.2%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). Claim read as: 'most' means more than 50 percent.",
+        "examples": [
+          {
+            "label": "Samples counted in the numerator",
+            "total": 1048,
+            "ids": [
+              "TCGA-3C-AAAU-01",
+              "TCGA-3C-AALI-01",
+              "TCGA-3C-AALJ-01"
+            ],
+            "kind": "included"
+          },
+          {
+            "label": "In the denominator but not counted",
+            "total": 53,
+            "ids": [
+              "TCGA-A7-A0CH-01",
+              "TCGA-AC-A2FM-01",
+              "TCGA-AN-A0FE-01"
+            ],
+            "kind": "fall_short"
+          }
+        ]
       },
       "cohort_trace": [
         {
@@ -164,7 +186,19 @@
           "clinical.tsv",
           "sample_manifest.csv"
         ],
-        "calculation": "ER-positive among primary tumor samples with ER status recorded: 808 / 1048 = 77.1%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). Claim read as: 'at least 500' tumors."
+        "calculation": "ER-positive among primary tumor samples with ER status recorded: 808 / 1048 = 77.1%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). Claim read as: 'at least 500' tumors.",
+        "examples": [
+          {
+            "label": "Samples counted",
+            "total": 808,
+            "ids": [
+              "TCGA-3C-AAAU-01",
+              "TCGA-3C-AALI-01",
+              "TCGA-3C-AALJ-01"
+            ],
+            "kind": "included"
+          }
+        ]
       },
       "cohort_trace": [
         {
@@ -213,7 +247,25 @@
           "clinical.tsv",
           "sample_manifest.csv"
         ],
-        "calculation": "samples with survival among primary tumor samples that are/have ER-positive: 808 / 808 = 100.0%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). OS deaths among these 808 samples: 100. Claim read as: 'most' means more than 50 percent."
+        "calculation": "samples with survival among primary tumor samples that are/have ER-positive: 808 / 808 = 100.0%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). OS deaths among these 808 samples: 100. Claim read as: 'most' means more than 50 percent.",
+        "examples": [
+          {
+            "label": "Samples counted in the numerator",
+            "total": 808,
+            "ids": [
+              "TCGA-3C-AAAU-01",
+              "TCGA-3C-AALI-01",
+              "TCGA-3C-AALJ-01"
+            ],
+            "kind": "included"
+          },
+          {
+            "label": "In the denominator but not counted",
+            "total": 0,
+            "ids": [],
+            "kind": "fall_short"
+          }
+        ]
       },
       "cohort_trace": [
         {
@@ -262,7 +314,29 @@
           "clinical.tsv",
           "sample_manifest.csv"
         ],
-        "calculation": "samples with protein among primary tumor samples that are/have ER-positive: 529 / 808 = 65.5%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). Claim read as: 'nearly all' means at least 95 percent."
+        "calculation": "samples with protein among primary tumor samples that are/have ER-positive: 529 / 808 = 65.5%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). Claim read as: 'nearly all' means at least 95 percent.",
+        "examples": [
+          {
+            "label": "Samples counted in the numerator",
+            "total": 529,
+            "ids": [
+              "TCGA-A1-A0SF-01",
+              "TCGA-A1-A0SJ-01",
+              "TCGA-A1-A0SQ-01"
+            ],
+            "kind": "included"
+          },
+          {
+            "label": "In the denominator but not counted",
+            "total": 279,
+            "ids": [
+              "TCGA-3C-AAAU-01",
+              "TCGA-3C-AALI-01",
+              "TCGA-3C-AALJ-01"
+            ],
+            "kind": "fall_short"
+          }
+        ]
       },
       "cohort_trace": [
         {
@@ -316,7 +390,19 @@
           "survival.tsv",
           "sample_manifest.csv"
         ],
-        "calculation": "samples with deaths among primary tumor samples that are/have ER-positive and has survival: 100 / 808 = 12.4%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). OS deaths among these 100 samples: 100. Claim read as: 'at least 100' deaths."
+        "calculation": "samples with deaths among primary tumor samples that are/have ER-positive and has survival: 100 / 808 = 12.4%. ER status read from breast_carcinoma_estrogen_receptor_status (recorded for 1048 of 1101 primary tumors; alternatives: ER_Status_nature2012 (782)). OS deaths among these 100 samples: 100. Claim read as: 'at least 100' deaths.",
+        "examples": [
+          {
+            "label": "Samples counted",
+            "total": 100,
+            "ids": [
+              "TCGA-A2-A04V-01",
+              "TCGA-A2-A0CO-01",
+              "TCGA-A2-A0CS-01"
+            ],
+            "kind": "included"
+          }
+        ]
       },
       "cohort_trace": [
         {
@@ -485,7 +571,29 @@
           "sample_manifest.csv (slides_for_sample)",
           "sample_manifest.csv"
         ],
-        "calculation": "samples with pathology slides among primary tumor samples: 1098 / 1101 = 99.7%. Claim read as: 'all/every' means 100 percent. 3 of 1101 samples fall short of 'all'."
+        "calculation": "samples with pathology slides among primary tumor samples: 1098 / 1101 = 99.7%. Claim read as: 'all/every' means 100 percent. 3 of 1101 samples fall short of 'all'.",
+        "examples": [
+          {
+            "label": "Samples counted in the numerator",
+            "total": 1098,
+            "ids": [
+              "TCGA-3C-AAAU-01",
+              "TCGA-3C-AALI-01",
+              "TCGA-3C-AALJ-01"
+            ],
+            "kind": "included"
+          },
+          {
+            "label": "In the denominator but not counted",
+            "total": 3,
+            "ids": [
+              "TCGA-AN-A0FE-01",
+              "TCGA-AN-A0FG-01",
+              "TCGA-E2-A1IP-01"
+            ],
+            "kind": "fall_short"
+          }
+        ]
       },
       "cohort_trace": [
         {

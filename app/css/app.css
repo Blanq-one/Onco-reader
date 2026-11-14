@@ -295,3 +295,9 @@ html[data-role="engineer"] [data-for]:not([data-for~="engineer"]) { display: non
 }
 @media print { .decision-panel .dp-form { display: none; } }
 .headline-text { font-size: 1.05rem; margin: var(--s2) 0; }
+
+/* samples behind a number */
+.chip.ok { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
+.ex-group h3 { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+.ids { list-style: none; margin: var(--s2) 0; padding: var(--s2) var(--s3); max-height: 220px; overflow: auto; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; columns: 2 15em; column-gap: var(--s3); }
+.ids li { break-inside: avoid; }

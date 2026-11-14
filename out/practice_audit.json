@@ -141,7 +141,21 @@
             "correct_value": null,
             "needs_human_review": false,
             "review_reason": null,
-            "guardrail_flags": []
+            "guardrail_flags": [],
+            "examples": [
+              {
+                "label": "Samples counted",
+                "total": 1101,
+                "ids": [
+                  "TCGA-3C-AAAU-01",
+                  "TCGA-3C-AALI-01",
+                  "TCGA-3C-AALJ-01",
+                  "TCGA-3C-AALK-01",
+                  "TCGA-4H-AAAK-01"
+                ],
+                "kind": "included"
+              }
+            ]
           },
           {
             "claim": "535 primary tumors have survival, mutation, copy number, RNA and protein data.",
@@ -162,7 +176,21 @@
             "correct_value": null,
             "needs_human_review": false,
             "review_reason": null,
-            "guardrail_flags": []
+            "guardrail_flags": [],
+            "examples": [
+              {
+                "label": "Samples counted",
+                "total": 535,
+                "ids": [
+                  "TCGA-A1-A0SF-01",
+                  "TCGA-A1-A0SH-01",
+                  "TCGA-A1-A0SJ-01",
+                  "TCGA-A1-A0SK-01",
+                  "TCGA-A1-A0SO-01"
+                ],
+                "kind": "included"
+              }
+            ]
           }
         ]
       },
@@ -241,7 +269,21 @@
             "correct_value": null,
             "needs_human_review": false,
             "review_reason": null,
-            "guardrail_flags": []
+            "guardrail_flags": [],
+            "examples": [
+              {
+                "label": "Samples in Luminal A",
+                "total": 421,
+                "ids": [
+                  "TCGA-A1-A0SD-01",
+                  "TCGA-A1-A0SE-01",
+                  "TCGA-A1-A0SF-01",
+                  "TCGA-A1-A0SG-01",
+                  "TCGA-A1-A0SH-01"
+                ],
+                "kind": "included"
+              }
+            ]
           },
           {
             "claim": "Luminal A accounts for about 62% of primary tumors with an RNA subtype call.",
@@ -258,7 +300,33 @@
             "correct_value": "49.9% (421 of 844)",
             "needs_human_review": false,
             "review_reason": null,
-            "guardrail_flags": []
+            "guardrail_flags": [],
+            "examples": [
+              {
+                "label": "Samples counted in the numerator",
+                "total": 421,
+                "ids": [
+                  "TCGA-A1-A0SD-01",
+                  "TCGA-A1-A0SE-01",
+                  "TCGA-A1-A0SF-01",
+                  "TCGA-A1-A0SG-01",
+                  "TCGA-A1-A0SH-01"
+                ],
+                "kind": "included"
+              },
+              {
+                "label": "In the denominator but not counted",
+                "total": 423,
+                "ids": [
+                  "TCGA-A1-A0SB-01",
+                  "TCGA-A1-A0SI-01",
+                  "TCGA-A1-A0SK-01",
+                  "TCGA-A1-A0SN-01",
+                  "TCGA-A1-A0SO-01"
+                ],
+                "kind": "fall_short"
+              }
+            ]
           }
         ]
       },
