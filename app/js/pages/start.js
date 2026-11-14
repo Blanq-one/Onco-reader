@@ -96,7 +96,7 @@ async function liveBox(slot) {
     h('p', { class: 'muted' }, 'Runs on this computer against the local data. Clinical or individual-patient requests are blocked.'),
     h('div', { class: 'row' }, practice, h('label', { for: 'report-file', class: 'muted' }, 'or upload a file (.md, .txt, .pdf)'), file),
     h('label', { for: 'report-text', class: 'muted', style: 'display:block;margin-top:12px' }, 'Report text'), ta,
-    h('div', { class: 'row', style: 'margin-top:8px' }, go, cancel, h('a', { class: 'start-multi', href: '#/reports' }, 'Several reports? Audit them one by one')), status));
+    h('div', { class: 'row', style: 'margin-top:8px' }, go, cancel, h('button', { class: 'btn start-multi', type: 'button', id: 'start-ten', onclick: () => { state.batchPreset = 'examples'; location.hash = '#/reports'; } }, 'Add the 10 example reports')), status));
   return true;
 }
 
